@@ -1,0 +1,35 @@
+{
+  "name": "awsdomainmanager",
+  "version": "1.0.0",
+  "description": "CLI tool for managing AWS Route 53 A records across multiple accounts",
+  "main": "dist/cli.cjs",
+  "type": "module",
+  "bin": {
+    "aws-domain-manager": "./dist/cli.cjs"
+  },
+  "scripts": {
+    "build": "webpack --mode production",
+    "dev": "webpack --mode development --watch",
+    "start": "node dist/cli.cjs",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@aws-sdk/client-route-53": "^3.1024.0",
+    "@aws-sdk/credential-provider-ini": "^3.972.28",
+    "ink": "^6.8.0",
+    "react": "^19.2.4"
+  },
+  "devDependencies": {
+    "@babel/core": "^7.29.0",
+    "@babel/preset-env": "^7.29.2",
+    "@babel/preset-react": "^7.28.5",
+    "babel-loader": "^10.1.1",
+    "react-devtools-core": "^7.0.1",
+    "webpack": "^5.105.4",
+    "webpack-cli": "^7.0.2",
+    "webpack-dev-server": "^5.2.3"
+  }
+}
