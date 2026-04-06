@@ -1,6 +1,6 @@
-# AWS Route 53 A Record Manager
+# AWS Route 53 Record Manager
 
-A terminal-based UI tool built with React and Ink for managing A records across multiple AWS Route 53 accounts.
+A terminal-based UI tool built with React and Ink for managing records across multiple AWS Route 53 accounts.
 
 ## Usage
 
@@ -10,10 +10,10 @@ npm i . && npm run buikld && npm run start
 
 ## Features
 
-- Manage A records across multiple AWS accounts
+- Manage A/AAAA/MX/TXT/NS/CNAME records across multiple AWS accounts
 - Terminal UI with keyboard navigation
 - Support for AWS credential profiles
-- Interactive A record creation
+- Interactive record creation
 
 ## Motivation
 

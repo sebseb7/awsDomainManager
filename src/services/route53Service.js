@@ -61,10 +61,10 @@ const formatRecordName = (recordName, zoneName) => {
 };
 
 /**
- * Load all A records for a hosted zone
+ * Load all DNS records for a hosted zone (A, AAAA, CNAME, MX, TXT, NS)
  * @param {Object} account - The AWS account object
  * @param {Object} zone - The hosted zone object
- * @returns {Promise<Array>} Array of formatted A records
+ * @returns {Promise<Array>} Array of formatted records
  */
 export const loadRecords = async (account, zone) => {
   try {
@@ -76,14 +76,16 @@ export const loadRecords = async (account, zone) => {
 
     const response = await client.send(command);
     
-    // Filter for A records only
-    const aRecords = (response.ResourceRecordSets || []).filter(
-      record => record.Type === 'A'
+    // Filter for supported record types only
+    const supportedTypes = ['A', 'AAAA', 'CNAME', 'MX', 'TXT', 'NS'];
+    const records = (response.ResourceRecordSets || []).filter(
+      record => supportedTypes.includes(record.Type)
     );
     
     // Transform to the format expected by RecordList
-    const formattedRecords = aRecords.map(record => ({
+    const formattedRecords = records.map(record => ({
       name: formatRecordName(record.Name, zone.Name),
+      type: record.Type,
       value: record.ResourceRecords?.map(r => r.Value).join(', ') || '',
       ttl: record.TTL || '-',
     }));
@@ -98,20 +100,25 @@ export const loadRecords = async (account, zone) => {
  * Create a new DNS record
  * @param {Object} account - The AWS account object
  * @param {Object} zone - The hosted zone object
- * @param {Object} recordData - The record data (name, value, ttl)
+ * @param {Object} recordData - The record data (name, value, ttl, type)
  * @returns {Promise<void>}
  */
 export const createRecord = async (account, zone, recordData) => {
   try {
     const client = createRoute53Client(account);
     
+    // Handle zone apex (@ or empty name)
+    const recordName = (!recordData.name || recordData.name === '@')
+      ? zone.Name
+      : `${recordData.name}.${zone.Name}`;
+
     const changeBatch = {
       Changes: [
         {
           Action: 'CREATE',
           ResourceRecordSet: {
-            Name: `${recordData.name}.${zone.Name}`,
-            Type: 'A',
+            Name: recordName,
+            Type: recordData.type || 'A',
             TTL: parseInt(recordData.ttl),
             ResourceRecords: [{ Value: recordData.value }],
           },
@@ -142,8 +149,8 @@ export const deleteRecord = async (account, zone, record) => {
     const client = createRoute53Client(account);
     
     // Construct the full DNS name for the record
-    const recordName = record.name === '@' 
-      ? zone.Name 
+    const recordName = (!record.name || record.name === '@')
+      ? zone.Name
       : `${record.name}.${zone.Name}`;
 
     const changeBatch = {
@@ -152,7 +159,7 @@ export const deleteRecord = async (account, zone, record) => {
           Action: 'DELETE',
           ResourceRecordSet: {
             Name: recordName,
-            Type: 'A',
+            Type: record.type || 'A',
             TTL: parseInt(record.ttl),
             ResourceRecords: [{ Value: record.value }],
           },

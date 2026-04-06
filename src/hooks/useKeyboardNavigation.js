@@ -26,6 +26,14 @@ export const useKeyboardNavigation = (navigationState, navigationActions) => {
   } = navigationActions;
 
   useInput((input, key) => {
+    // When add record form is active, only handle escape
+    if (showAddRecord) {
+      if (input === 'escape' || key.escape) {
+        handleEscape();
+      }
+      return;
+    }
+
     // Handle delete confirmation
     if (showDeleteConfirm) {
       if (input === 'y' || input === 'Y') {
@@ -36,9 +44,21 @@ export const useKeyboardNavigation = (navigationState, navigationActions) => {
       return;
     }
     
-    // Handle 'a' to add a new record (only on records screen and not already adding)
-    if (input === 'a' && screen === 'records' && !showAddRecord) {
-      handleAddRecord();
+    // Handle record type shortcuts to add a new record (only on records screen and not already adding)
+    if (screen === 'records' && !showAddRecord) {
+      const recordTypeMap = {
+        'a': 'A',
+        'A': 'AAAA',
+        'c': 'CNAME',
+        'm': 'MX',
+        't': 'TXT',
+        'n': 'NS',
+      };
+      
+      if (recordTypeMap[input]) {
+        handleAddRecord(recordTypeMap[input]);
+        return;
+      }
     }
     
     // Handle 'd' to delete selected record (only on records screen)
@@ -58,10 +78,7 @@ export const useKeyboardNavigation = (navigationState, navigationActions) => {
     
     // Handle escape to go back
     if (input === 'escape' || key.escape) {
-      if (showAddRecord) {
-        // Cancel add record form
-        handleEscape();
-      } else if (screen === 'records') {
+      if (screen === 'records') {
         handleEscape();
       } else if (screen === 'zone') {
         handleEscape();

@@ -45,6 +45,9 @@ const RecordsScreen = ({
             <Text color="cyan" bold>  Name: {records[selectedRecordIndex]?.name}</Text>
           </Box>
           <Box marginBottom={1}>
+            <Text color="cyan" bold>  Type: {records[selectedRecordIndex]?.type || 'A'}</Text>
+          </Box>
+          <Box marginBottom={1}>
             <Text color="cyan" bold>  Value: {records[selectedRecordIndex]?.value}</Text>
           </Box>
           <Box marginBottom={1}>
@@ -63,7 +66,7 @@ const RecordsScreen = ({
       )}
       {!showAddRecord && !showDeleteConfirm && records.length > 0 && (
         <Box marginTop={1}>
-          <Text dimColor>Use up/down arrows and d to delete, a to create a new record, or press escape to go back</Text>
+          <Text dimColor>Use up/down arrows, d to delete, a/A/c/m/t/n to create records, or press escape to go back</Text>
         </Box>
       )}
     </Box>

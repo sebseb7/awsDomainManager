@@ -79,7 +79,7 @@ const App = ({
     <Box flexDirection="column" padding={1}>
       <Box marginBottom={1}>
         <Text bold>
-          AWS Route 53 A Record Manager
+          AWS Route 53 Record Manager
         </Text>
       </Box>
 

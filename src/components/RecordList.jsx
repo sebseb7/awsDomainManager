@@ -13,7 +13,7 @@ const RecordList = ({ records, loading, selectedIndex = 0 }) => {
   if (records.length === 0) {
     return (
       <Box>
-        <Text dimColor>No A records found</Text>
+        <Text dimColor>No records found</Text>
       </Box>
     );
   }
@@ -22,6 +22,7 @@ const RecordList = ({ records, loading, selectedIndex = 0 }) => {
     <Box flexDirection="column">
       <Box>
         <Text bold>{'Name'.padEnd(20)}</Text>
+        <Text bold>{'Type'.padEnd(8)}</Text>
         <Text bold>{'Value'.padEnd(40)}</Text>
         <Text bold>TTL</Text>
       </Box>
@@ -30,6 +31,9 @@ const RecordList = ({ records, loading, selectedIndex = 0 }) => {
           <Text color={index === selectedIndex ? 'cyan' : undefined}>
             {index === selectedIndex ? '▸ ' : '  '}
             {record.name.padEnd(20)}
+          </Text>
+          <Text color={index === selectedIndex ? 'cyan' : undefined}>
+            {(record.type || 'A').padEnd(8)}
           </Text>
           <Text color={index === selectedIndex ? 'cyan' : undefined}>{record.value.padEnd(40)}</Text>
           <Text color={index === selectedIndex ? 'cyan' : undefined}>{record.ttl}</Text>

@@ -1,85 +1,100 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Box, Text, useInput } from 'ink';
+import TextInput from 'ink-text-input';
 
 const AddRecordForm = ({ newRecord, setNewRecord, addRecord, onCancel, loading }) => {
-  const [focusedField, setFocusedField] = React.useState('name');
+  const [focusedField, setFocusedField] = useState('name');
 
-  useInput((input, key) => {
-    if (key.escape) {
-      if (onCancel) onCancel();
-      return;
-    }
+  const fieldOrder = ['name', 'value', 'ttl'];
+  const fieldLabels = { name: 'Name', value: 'Value', ttl: 'TTL' };
 
-    if (key.return) {
-      if (focusedField === 'ttl') {
-        addRecord();
-      } else {
-        // Move to next field
-        if (focusedField === 'name') setFocusedField('value');
-        else if (focusedField === 'value') setFocusedField('ttl');
-      }
-      return;
-    }
+  const getValue = (fieldName) => {
+    if (fieldName === 'name') return newRecord.name || '';
+    if (fieldName === 'value') return newRecord.value || '';
+    if (fieldName === 'ttl') return String(newRecord.ttl || 300);
+    return '';
+  };
 
-    if (key.tab) {
-      if (focusedField === 'name') setFocusedField('value');
-      else if (focusedField === 'value') setFocusedField('ttl');
-      else if (focusedField === 'ttl') setFocusedField('name');
-      return;
-    }
-
-    // Update field value
-    if (focusedField === 'name') {
-      setNewRecord({ ...newRecord, name: newRecord.name + input });
-    } else if (focusedField === 'value') {
-      setNewRecord({ ...newRecord, value: newRecord.value + input });
-    } else if (focusedField === 'ttl') {
-      if (/\d/.test(input)) {
-        setNewRecord({ ...newRecord, ttl: newRecord.ttl + input });
-      }
-    }
-  });
-
-  const handleBackspace = (key) => {
-    if (key.backspace) {
-      if (focusedField === 'name' && newRecord.name.length > 0) {
-        setNewRecord({ ...newRecord, name: newRecord.name.slice(0, -1) });
-      } else if (focusedField === 'value' && newRecord.value.length > 0) {
-        setNewRecord({ ...newRecord, value: newRecord.value.slice(0, -1) });
-      } else if (focusedField === 'ttl' && newRecord.ttl.length > 1) {
-        setNewRecord({ ...newRecord, ttl: newRecord.ttl.slice(0, -1) });
+  const setValue = (fieldName, value) => {
+    if (fieldName === 'name') {
+      setNewRecord(prev => ({ ...prev, name: value }));
+    } else if (fieldName === 'value') {
+      setNewRecord(prev => ({ ...prev, value }));
+    } else if (fieldName === 'ttl') {
+      if (/^\d*$/.test(value)) {
+        setNewRecord(prev => ({ ...prev, ttl: value === '' ? 300 : parseInt(value) }));
       }
     }
   };
 
+  const nextField = () => {
+    const idx = fieldOrder.indexOf(focusedField);
+    const next = fieldOrder[(idx + 1) % fieldOrder.length];
+    setFocusedField(next);
+  };
+
+  const prevField = () => {
+    const idx = fieldOrder.indexOf(focusedField);
+    const prev = fieldOrder[(idx - 1 + fieldOrder.length) % fieldOrder.length];
+    setFocusedField(prev);
+  };
+
+  // Only handle Escape, Tab, and arrows at the global level; TextInput handles Enter/onSubmit
+  useInput((input, key) => {
+    if (key.escape) {
+      onCancel?.();
+      return;
+    }
+
+    if (key.tab) {
+      // Shift+Tab goes backwards
+      if (key.shift) {
+        prevField();
+      } else {
+        nextField();
+      }
+      return;
+    }
+
+    if (key.upArrow) {
+      prevField();
+      return;
+    }
+
+    if (key.downArrow) {
+      nextField();
+      return;
+    }
+  });
+
+  const recordTypeLabel = newRecord.type || 'A';
+
   return (
     <Box flexDirection="column" borderStyle="round" padding={1}>
-      <Text bold>Add A Record</Text>
-      
-      <Box marginTop={1}>
-        <Text>
-          Name{focusedField === 'name' ? '>' : ' '}: {newRecord.name}
-          {focusedField === 'name' && <Text>_</Text>}
-        </Text>
-      </Box>
+      <Text bold>Add {recordTypeLabel} Record</Text>
 
-      <Box>
-        <Text>
-          Value{focusedField === 'value' ? '>' : ' '}: {newRecord.value}
-          {focusedField === 'value' && <Text>_</Text>}
-        </Text>
-      </Box>
-
-      <Box>
-        <Text>
-          TTL{focusedField === 'ttl' ? '>' : ' '}: {newRecord.ttl}
-          {focusedField === 'ttl' && <Text>_</Text>}
-        </Text>
-      </Box>
+      {fieldOrder.map((fieldName) => (
+        <Box key={fieldName} marginTop={fieldName === 'name' ? 1 : 0}>
+          <Text>{fieldLabels[fieldName]}: </Text>
+          <TextInput
+            value={getValue(fieldName)}
+            focus={focusedField === fieldName}
+            showCursor
+            onChange={(val) => setValue(fieldName, val)}
+            onSubmit={() => {
+              if (fieldName === 'ttl') {
+                addRecord();
+              } else {
+                nextField();
+              }
+            }}
+          />
+        </Box>
+      ))}
 
       <Box marginTop={1}>
         <Text dimColor>
-          Press Enter to advance, Tab to cycle, Escape to cancel
+          Type to edit, Enter to advance, ↑/↓ or Tab to cycle, Esc to cancel
         </Text>
       </Box>
     </Box>

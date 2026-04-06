@@ -1,7 +1,7 @@
 {
   "name": "awsdomainmanager",
-  "version": "1.0.0",
-  "description": "CLI tool for managing AWS Route 53 A records across multiple accounts",
+  "version": "2.0.0",
+  "description": "CLI tool for managing AWS Route 53 records across multiple accounts",
   "main": "dist/cli.cjs",
   "type": "module",
   "bin": {
@@ -20,6 +20,7 @@
     "@aws-sdk/client-route-53": "^3.1024.0",
     "@aws-sdk/credential-provider-ini": "^3.972.28",
     "ink": "^6.8.0",
+    "ink-text-input": "^6.0.0",
     "react": "^19.2.4"
   },
   "devDependencies": {

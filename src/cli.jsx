@@ -22,6 +22,7 @@ const CLI = () => {
     name: '',
     value: '',
     ttl: 300,
+    type: 'A',
   });
   const [selectedRecordIndex, setSelectedRecordIndex] = useState(0);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
@@ -75,7 +76,7 @@ const CLI = () => {
   };
 
   const addRecord = async () => {
-    if (!selectedZone || !newRecord.name || !newRecord.value) {
+    if (!selectedZone || !newRecord.value) {
       return;
     }
 
@@ -84,7 +85,7 @@ const CLI = () => {
     try {
       await createRecord(selectedAccount, selectedZone, newRecord);
       setShowAddRecord(false);
-      setNewRecord({ name: '', value: '', ttl: 300 });
+      setNewRecord({ name: '', value: '', ttl: 300, type: 'A' });
       // Refresh records
       loadRecordsAndHandleError(selectedAccount, selectedZone);
     } catch (err) {
@@ -126,7 +127,10 @@ const CLI = () => {
   const navigationActions = {
     handleDeleteConfirm: deleteRecord,
     handleDeleteCancel: () => setShowDeleteConfirm(false),
-    handleAddRecord: () => setShowAddRecord(true),
+    handleAddRecord: (recordType) => {
+      setNewRecord({ name: '', value: '', ttl: 300, type: recordType || 'A' });
+      setShowAddRecord(true);
+    },
     handleDeleteRecord: () => setShowDeleteConfirm(true),
     handleUpArrow: () => setSelectedRecordIndex(prev => Math.max(0, prev - 1)),
     handleDownArrow: () => setSelectedRecordIndex(prev => Math.min(records.length - 1, prev + 1)),
