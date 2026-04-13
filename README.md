@@ -5,7 +5,7 @@ A terminal-based UI tool built with React and Ink for managing records across mu
 ## Usage
 
 ```bash
-npm i . && npm run buikld && npm run start
+npm i . && npm run build && npm run start
 ```
 
 ## Features
