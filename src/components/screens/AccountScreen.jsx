@@ -7,6 +7,7 @@ const AccountScreen = ({
   selectedAccount,
   setSelectedAccount,
   setScreen,
+  selectedResource,
 }) => {
   return (
     <Box flexDirection="column" marginBottom={1}>
@@ -19,7 +20,12 @@ const AccountScreen = ({
         setSelectedAccount={setSelectedAccount}
         onSelect={(account) => {
           setSelectedAccount(account);
-          setScreen('zone');
+          // Navigate to the correct screen based on selected resource
+          if (selectedResource?.id === 'ec2') {
+            setScreen('sg');
+          } else {
+            setScreen('zone');
+          }
         }}
       />
       <Box marginTop={1}>

@@ -17,20 +17,21 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
-    "@aws-sdk/client-route-53": "^3.1024.0",
-    "@aws-sdk/credential-provider-ini": "^3.972.28",
-    "ink": "^6.8.0",
+    "@aws-sdk/client-ec2": "^3.1081.0",
+    "@aws-sdk/client-route-53": "^3.1081.0",
+    "@aws-sdk/credential-provider-ini": "^3.972.62",
+    "ink": "^7.1.0",
     "ink-text-input": "^6.0.0",
-    "react": "^19.2.4"
+    "react": "^19.2.7"
   },
   "devDependencies": {
-    "@babel/core": "^7.29.0",
-    "@babel/preset-env": "^7.29.2",
-    "@babel/preset-react": "^7.28.5",
+    "@babel/core": "^8.0.1",
+    "@babel/preset-env": "^8.0.2",
+    "@babel/preset-react": "^8.0.1",
     "babel-loader": "^10.1.1",
     "react-devtools-core": "^7.0.1",
-    "webpack": "^5.105.4",
-    "webpack-cli": "^7.0.2",
-    "webpack-dev-server": "^5.2.3"
+    "webpack": "^5.108.4",
+    "webpack-cli": "^7.2.1",
+    "webpack-dev-server": "^6.0.0"
   }
 }
