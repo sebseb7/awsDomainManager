@@ -1,6 +1,6 @@
 [package]
 name = "aws-domain-manager"
-version = "1.2.0"
+version = "1.3.0"
 description = "Desktop UI for managing AWS Route53, EC2 Security Groups, S3 Buckets, and AWS Profiles"
 authors = ["sebseb7"]
 edition = "2021"

@@ -81,7 +81,7 @@ export function App() {
           </div>
           <div>
             <div className="brand-title">AWS Domain Manager</div>
-            <div className="brand-sub">Desktop v1.2.0</div>
+            <div className="brand-sub">Desktop v1.3.0</div>
           </div>
         </div>
 
