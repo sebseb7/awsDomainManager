@@ -1,0 +1,76 @@
+name: Release Desktop App
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  publish-tauri:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos-latest
+            bundles: app,dmg
+          - platform: windows-latest
+            bundles: nsis
+
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: './desktop/src-tauri -> target'
+
+      - name: Install frontend dependencies
+        working-directory: desktop
+        run: npm ci
+
+      - name: Build and release Tauri app
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          projectPath: desktop
+          tagName: ${{ github.ref_name }}
+          releaseName: 'AWS Domain Manager ${{ github.ref_name }}'
+          releaseBody: |
+            ## AWS Domain Manager Desktop (Tauri v2)
+
+            Native desktop application for managing AWS Route53 DNS records, EC2 Security Group inbound rules, S3 buckets & objects (with scoped IAM user creation and QR code export), and AWS credential profiles.
+
+            ### Downloads
+            - **macOS (Apple Silicon):** `.dmg` disk image or `.app.zip` application bundle
+            - **Windows (x64):** `.exe` NSIS installer
+          releaseDraft: false
+          prerelease: false
+          args: --bundles ${{ matrix.bundles }}
+
+      - name: Package and upload macOS .app bundle
+        if: matrix.platform == 'macos-latest'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          APP_PATH=$(find desktop/src-tauri/target/release/bundle/macos -maxdepth 1 -name "*.app" | head -n 1)
+          if [ -n "$APP_PATH" ]; then
+            ditto -c -k --sequesterRsrc --keepParent "$APP_PATH" "AWS-Domain-Manager-macos-aarch64.app.zip"
+            gh release upload "${{ github.ref_name }}" "AWS-Domain-Manager-macos-aarch64.app.zip" --clobber
+          fi

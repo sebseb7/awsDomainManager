@@ -4,6 +4,16 @@ A terminal-based UI tool built with React and Ink for managing AWS resources acr
 
 ## Usage
 
+### Desktop App (Tauri v2)
+
+Download the pre-built macOS (`.dmg` / `.app.zip`) or Windows (`.exe`) installer from [GitHub Releases](https://github.com/sebseb7/awsDomainManager/releases), or run locally from source:
+
+```bash
+cd desktop && npm install && npm run tauri dev
+```
+
+### Terminal UI (CLI)
+
 ```bash
 npm i . && npm run build && npm run start
 ```

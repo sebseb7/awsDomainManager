@@ -11,6 +11,8 @@
     "build": "webpack --mode production",
     "dev": "webpack --mode development --watch",
     "start": "node dist/cli.cjs",
+    "desktop:dev": "npm --prefix desktop run tauri dev",
+    "desktop:build": "npm --prefix desktop run tauri build",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],

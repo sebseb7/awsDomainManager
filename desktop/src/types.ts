@@ -1,0 +1,81 @@
+export interface AwsProfile {
+  id: string;
+  name: string;
+  profile: string;
+  region: string;
+  accessKeyId: string;
+  secretAccessKey: string;
+  sessionToken: string;
+}
+
+export interface AccountInput {
+  profile: string;
+  region: string;
+  accessKeyId: string;
+  secretAccessKey: string;
+  sessionToken: string;
+}
+
+export interface HostedZone {
+  id: string;
+  name: string;
+  recordCount: number;
+  isPrivate: boolean;
+}
+
+export interface DnsRecord {
+  name: string;
+  type: string;
+  value: string;
+  ttl: number;
+}
+
+export interface SecurityGroup {
+  groupId: string;
+  groupName: string;
+  description: string;
+  vpcId: string;
+}
+
+export interface InboundRule {
+  id: string;
+  type: string;
+  protocol: string;
+  port: string;
+  fromPort: number | null;
+  toPort: number | null;
+  source: string;
+  description: string;
+}
+
+export interface AddRuleInput {
+  protocol: string;
+  fromPort: number | null;
+  toPort: number | null;
+  source: string;
+  description: string;
+}
+
+export interface S3Bucket {
+  name: string;
+  creationDate: string;
+}
+
+export interface S3Object {
+  key: string;
+  displayName: string;
+  isFolder: boolean;
+  size: number | null;
+  lastModified: string;
+}
+
+export interface CreatedIamUser {
+  bucketName: string;
+  userName: string;
+  role: string;
+  roleLabel: string;
+  accessKeyId: string;
+  secretAccessKey: string;
+}
+
+export type NavSection = 'route53' | 'ec2' | 's3' | 'accounts';
