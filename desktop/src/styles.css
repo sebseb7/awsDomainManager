@@ -564,3 +564,118 @@ tbody tr:hover {
   color: var(--accent);
   border-color: var(--accent);
 }
+
+/* IAM Permissions Guide */
+.permissions-card {
+  overflow: hidden;
+}
+
+.permissions-header {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 16px;
+  background: transparent;
+  border: none;
+  color: var(--text);
+  cursor: pointer;
+  text-align: left;
+}
+
+.permissions-header:hover {
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.permissions-header-left {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+}
+
+.permissions-title {
+  font-weight: 600;
+  font-size: 14px;
+}
+
+.permissions-sub {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.permissions-body {
+  padding: 0 16px 16px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.permissions-intro {
+  margin-top: 12px;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.permissions-toggles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 16px;
+}
+
+.perm-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.perm-check input {
+  accent-color: var(--accent);
+}
+
+.perm-check-readonly {
+  color: var(--blue);
+}
+
+.code-block-wrap {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  background: #0b1017;
+}
+
+.code-block-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  background: rgba(255, 255, 255, 0.03);
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.code-block {
+  padding: 12px 14px;
+  max-height: 300px;
+  overflow: auto;
+  font-size: 12px;
+  line-height: 1.45;
+  color: #cbd5e1;
+}
+
+.permissions-notes {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12.5px;
+  color: var(--text-muted);
+}
+
+.permissions-notes strong {
+  color: var(--text);
+}

@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Edit2, KeyRound, Plus, Trash2 } from 'lucide-react';
 import { api, maskSecret } from '../api';
 import type { AccountInput, AwsProfile } from '../types';
+import { IamPermissionsGuide } from './IamPermissionsGuide';
 
 interface Props {
   profiles: AwsProfile[];
@@ -150,6 +151,10 @@ export const AccountsView: React.FC<Props> = ({
             </table>
           </div>
         )}
+      </div>
+
+      <div style={{ marginTop: 18 }}>
+        <IamPermissionsGuide defaultExpanded={profiles.length === 0} />
       </div>
 
       {formMode && (
