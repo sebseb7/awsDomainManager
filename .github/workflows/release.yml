@@ -156,7 +156,7 @@ jobs:
           releaseBody: |
             ## AWS Domain Manager Desktop (Tauri v2)
 
-            Native desktop application for managing AWS Route53 DNS records, EC2 Security Group inbound rules, S3 buckets & objects (with scoped IAM user creation, key revoke/recreate, multiple read keys & single write key, and QR code export), and AWS credential profiles.
+            Native desktop application for managing AWS Route53 DNS records, EC2 Security Group inbound rules, S3 buckets & objects (with scoped IAM user creation, key revoke/recreate, multiple read keys & single write key, and QR code export), Amazon SES identities (domains & email addresses), and AWS credential profiles.
 
             ### Downloads
             - **macOS (Apple Silicon):** `.dmg` disk image or `.app.zip` application bundle
