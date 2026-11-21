@@ -82,6 +82,7 @@ export interface IamAccessKeyMeta {
   accessKeyId: string;
   status: string;
   createDate: string;
+  lastUsedDate?: string;
 }
 
 export interface BucketIamUser {
@@ -90,6 +91,7 @@ export interface BucketIamUser {
   role: 'put-only' | 'read-only';
   roleLabel: string;
   createdAt: string;
+  lastUsedAt?: string;
   accessKeys: IamAccessKeyMeta[];
 }
 

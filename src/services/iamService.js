@@ -10,6 +10,7 @@ import {
   CreateAccessKeyCommand,
   ListAccessKeysCommand,
   DeleteAccessKeyCommand,
+  GetAccessKeyLastUsedCommand,
 } from '@aws-sdk/client-iam';
 import { fromIni } from '@aws-sdk/credential-provider-ini';
 
@@ -288,13 +289,32 @@ const inspectCandidateUser = async (client, bucketName, userName, createdAtHint 
   if (!role) return null;
 
   const keysResp = await client.send(new ListAccessKeysCommand({ UserName: userName }));
-  const accessKeys = (keysResp.AccessKeyMetadata || []).map((k) => ({
-    accessKeyId: k.AccessKeyId || '',
-    status: k.Status || 'Unknown',
-    createDate: k.CreateDate
-      ? new Date(k.CreateDate).toISOString().slice(0, 16).replace('T', ' ')
-      : '-',
-  }));
+  const accessKeys = [];
+  for (const k of keysResp.AccessKeyMetadata || []) {
+    const accessKeyId = k.AccessKeyId || '';
+    let lastUsedDate = 'Never';
+    if (accessKeyId) {
+      try {
+        const usedResp = await client.send(
+          new GetAccessKeyLastUsedCommand({ AccessKeyId: accessKeyId })
+        );
+        const rawLastUsed = usedResp.AccessKeyLastUsed?.LastUsedDate;
+        lastUsedDate = rawLastUsed
+          ? new Date(rawLastUsed).toISOString().slice(0, 16).replace('T', ' ')
+          : 'Never';
+      } catch {
+        lastUsedDate = '-';
+      }
+    }
+    accessKeys.push({
+      accessKeyId,
+      status: k.Status || 'Unknown',
+      createDate: k.CreateDate
+        ? new Date(k.CreateDate).toISOString().slice(0, 16).replace('T', ' ')
+        : '-',
+      lastUsedDate,
+    });
+  }
 
   return {
     bucketName,
@@ -302,9 +322,10 @@ const inspectCandidateUser = async (client, bucketName, userName, createdAtHint 
     role,
     roleLabel: ROLE_LABELS[role] || role,
     createdAt:
-      createdAtHint ||
       accessKeys[0]?.createDate ||
+      createdAtHint ||
       '-',
+    lastUsedAt: accessKeys[0]?.lastUsedDate || 'Never',
     accessKeys,
   };
 };

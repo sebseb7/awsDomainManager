@@ -82,6 +82,18 @@ const BASE_TUI_PROPS = {
   bucketKeys: DUMMY_BUCKET_IAM_USERS.map((u) => ({
     ...u,
     createdAt: u.createdAt.slice(0, 16).replace('T', ' '),
+    lastUsedAt:
+      u.lastUsedAt && u.lastUsedAt !== 'Never'
+        ? u.lastUsedAt.slice(0, 16).replace('T', ' ')
+        : 'Never',
+    accessKeys: u.accessKeys.map((k) => ({
+      ...k,
+      createDate: k.createDate.slice(0, 16).replace('T', ' '),
+      lastUsedDate:
+        k.lastUsedDate && k.lastUsedDate !== 'Never'
+          ? k.lastUsedDate.slice(0, 16).replace('T', ' ')
+          : 'Never',
+    })),
   })),
   selectedKeyIndex: 0,
   addKeyRole: null,

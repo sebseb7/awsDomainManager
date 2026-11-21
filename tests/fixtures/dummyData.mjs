@@ -146,11 +146,13 @@ export const DUMMY_BUCKET_IAM_USERS = [
     role: 'put-only',
     roleLabel: 'Put Only (no read, no delete)',
     createdAt: '2026-06-01T09:12:00Z',
+    lastUsedAt: '2026-11-21T03:00:00Z',
     accessKeys: [
       {
         accessKeyId: 'AKIAWRITE0001EXAMPLE',
         status: 'Active',
         createDate: '2026-06-01T09:12:00Z',
+        lastUsedDate: '2026-11-21T03:00:00Z',
       },
     ],
   },
@@ -160,11 +162,13 @@ export const DUMMY_BUCKET_IAM_USERS = [
     role: 'read-only',
     roleLabel: 'Read Only (no put, no delete)',
     createdAt: '2026-06-01T09:13:00Z',
+    lastUsedAt: '2026-11-20T18:45:00Z',
     accessKeys: [
       {
         accessKeyId: 'AKIAREAD00001EXAMPLE',
         status: 'Active',
         createDate: '2026-06-01T09:13:00Z',
+        lastUsedDate: '2026-11-20T18:45:00Z',
       },
     ],
   },
@@ -174,11 +178,13 @@ export const DUMMY_BUCKET_IAM_USERS = [
     role: 'read-only',
     roleLabel: 'Read Only (no put, no delete)',
     createdAt: '2026-09-10T14:30:00Z',
+    lastUsedAt: '2026-11-19T12:10:00Z',
     accessKeys: [
       {
         accessKeyId: 'AKIAREAD00002EXAMPLE',
         status: 'Active',
         createDate: '2026-09-10T14:30:00Z',
+        lastUsedDate: '2026-11-19T12:10:00Z',
       },
     ],
   },
@@ -188,11 +194,13 @@ export const DUMMY_BUCKET_IAM_USERS = [
     role: 'read-only',
     roleLabel: 'Read Only (no put, no delete)',
     createdAt: '2026-10-22T11:05:00Z',
+    lastUsedAt: 'Never',
     accessKeys: [
       {
         accessKeyId: 'AKIAREAD00003EXAMPLE',
         status: 'Active',
         createDate: '2026-10-22T11:05:00Z',
+        lastUsedDate: 'Never',
       },
     ],
   },

@@ -189,7 +189,8 @@ Create a dedicated IAM user for this tool instead of using root or `Administrato
         "iam:DeleteUserPolicy",
         "iam:CreateAccessKey",
         "iam:ListAccessKeys",
-        "iam:DeleteAccessKey"
+        "iam:DeleteAccessKey",
+        "iam:GetAccessKeyLastUsed"
       ],
       "Resource": "arn:aws:iam::*:user/s3-bucket-users/*"
     }

@@ -127,6 +127,36 @@ export const BucketKeysModal: React.FC<Props> = ({
     }
   };
 
+  const renderCreatedDates = (u: BucketIamUser) => {
+    if (u.accessKeys.length === 0) {
+      return formatDate(u.createdAt);
+    }
+    return u.accessKeys.map((k) => (
+      <div key={k.accessKeyId} className="mono" style={{ fontSize: 12 }}>
+        {formatDate(k.createDate || u.createdAt)}
+      </div>
+    ));
+  };
+
+  const renderLastUsedDates = (u: BucketIamUser) => {
+    if (u.accessKeys.length === 0) {
+      return <span style={{ color: 'var(--text-muted)' }}>-</span>;
+    }
+    return u.accessKeys.map((k) => {
+      const raw = k.lastUsedDate || u.lastUsedAt || 'Never';
+      const isNever = raw === 'Never' || raw === '-';
+      return (
+        <div
+          key={k.accessKeyId}
+          className="mono"
+          style={{ fontSize: 12, color: isNever ? 'var(--text-muted)' : 'var(--text)' }}
+        >
+          {isNever ? raw : formatDate(raw)}
+        </div>
+      );
+    });
+  };
+
   const renderKeyIds = (u: BucketIamUser) => {
     if (u.accessKeys.length === 0) {
       return <span style={{ color: 'var(--text-muted)' }}>No active keys</span>;
@@ -220,6 +250,7 @@ export const BucketKeysModal: React.FC<Props> = ({
                         <th>IAM User</th>
                         <th>Access Key ID</th>
                         <th>Created</th>
+                        <th>Last Used</th>
                         <th style={{ width: 190 }}>Actions</th>
                       </tr>
                     </thead>
@@ -231,8 +262,9 @@ export const BucketKeysModal: React.FC<Props> = ({
                           </td>
                           <td>{renderKeyIds(u)}</td>
                           <td className="mono" style={{ color: 'var(--text-muted)' }}>
-                            {formatDate(u.createdAt)}
+                            {renderCreatedDates(u)}
                           </td>
+                          <td>{renderLastUsedDates(u)}</td>
                           <td>
                             <div style={{ display: 'flex', gap: 6 }}>
                               <button
@@ -322,6 +354,7 @@ export const BucketKeysModal: React.FC<Props> = ({
                         <th>IAM User</th>
                         <th>Access Key ID</th>
                         <th>Created</th>
+                        <th>Last Used</th>
                         <th style={{ width: 190 }}>Actions</th>
                       </tr>
                     </thead>
@@ -333,8 +366,9 @@ export const BucketKeysModal: React.FC<Props> = ({
                           </td>
                           <td>{renderKeyIds(u)}</td>
                           <td className="mono" style={{ color: 'var(--text-muted)' }}>
-                            {formatDate(u.createdAt)}
+                            {renderCreatedDates(u)}
                           </td>
+                          <td>{renderLastUsedDates(u)}</td>
                           <td>
                             <div style={{ display: 'flex', gap: 6 }}>
                               <button

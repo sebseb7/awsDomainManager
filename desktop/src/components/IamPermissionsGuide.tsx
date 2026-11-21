@@ -97,6 +97,7 @@ export const IamPermissionsGuide: React.FC<Props> = ({ defaultExpanded = false }
           'iam:CreateAccessKey',
           'iam:ListAccessKeys',
           'iam:DeleteAccessKey',
+          'iam:GetAccessKeyLastUsed',
         ],
         Resource: 'arn:aws:iam::*:user/s3-bucket-users/*',
       });

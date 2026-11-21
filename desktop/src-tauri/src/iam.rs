@@ -25,6 +25,7 @@ pub struct IamAccessKeyMetaDto {
     pub access_key_id: String,
     pub status: String,
     pub create_date: String,
+    pub last_used_date: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -35,6 +36,7 @@ pub struct BucketIamUserDto {
     pub role: String,
     pub role_label: String,
     pub created_at: String,
+    pub last_used_at: String,
     pub access_keys: Vec<IamAccessKeyMetaDto>,
 }
 
@@ -369,25 +371,54 @@ async fn inspect_candidate_user(
             )
         })?;
 
-    let access_keys: Vec<IamAccessKeyMetaDto> = keys_resp
-        .access_key_metadata()
-        .iter()
-        .map(|k| IamAccessKeyMetaDto {
-            access_key_id: k.access_key_id().unwrap_or_default().to_string(),
-            status: k
-                .status()
-                .map(|s| s.as_str().to_string())
-                .unwrap_or_else(|| "Unknown".to_string()),
-            create_date: k
-                .create_date()
-                .map(|d| d.to_string())
-                .unwrap_or_else(|| "-".to_string()),
-        })
-        .collect();
+    let mut access_keys: Vec<IamAccessKeyMetaDto> = Vec::new();
+    for k in keys_resp.access_key_metadata() {
+        let key_id = k.access_key_id().unwrap_or_default().to_string();
+        let status = k
+            .status()
+            .map(|s| s.as_str().to_string())
+            .unwrap_or_else(|| "Unknown".to_string());
+        let create_date = k
+            .create_date()
+            .map(|d| d.to_string())
+            .unwrap_or_else(|| "-".to_string());
 
-    let created_at = created_at_hint
-        .or_else(|| access_keys.first().map(|k| k.create_date.clone()))
+        let last_used_date = if !key_id.is_empty() {
+            match client
+                .get_access_key_last_used()
+                .access_key_id(&key_id)
+                .send()
+                .await
+            {
+                Ok(used_resp) => used_resp
+                    .access_key_last_used()
+                    .and_then(|u| u.last_used_date())
+                    .map(|d| d.to_string())
+                    .unwrap_or_else(|| "Never".to_string()),
+                Err(_) => "-".to_string(),
+            }
+        } else {
+            "-".to_string()
+        };
+
+        access_keys.push(IamAccessKeyMetaDto {
+            access_key_id: key_id,
+            status,
+            create_date,
+            last_used_date,
+        });
+    }
+
+    let created_at = access_keys
+        .first()
+        .map(|k| k.create_date.clone())
+        .or(created_at_hint)
         .unwrap_or_else(|| "-".to_string());
+
+    let last_used_at = access_keys
+        .first()
+        .map(|k| k.last_used_date.clone())
+        .unwrap_or_else(|| "Never".to_string());
 
     Ok(Some(BucketIamUserDto {
         bucket_name: bucket_name.to_string(),
@@ -395,6 +426,7 @@ async fn inspect_candidate_user(
         role: role.to_string(),
         role_label: role_label(role).to_string(),
         created_at,
+        last_used_at,
         access_keys,
     }))
 }

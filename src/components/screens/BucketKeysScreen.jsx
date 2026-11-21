@@ -147,10 +147,11 @@ const BucketKeysScreen = ({
       ) : (
         <Box flexDirection="column">
           <Box>
-            <Text bold>{'  '}{'Role'.padEnd(10)}</Text>
-            <Text bold>{'IAM User'.padEnd(32)}</Text>
-            <Text bold>{'Access Key ID'.padEnd(26)}</Text>
-            <Text bold>Created (UTC)</Text>
+            <Text bold>{'  '}{'Role'.padEnd(9)}</Text>
+            <Text bold>{'IAM User'.padEnd(28)}</Text>
+            <Text bold>{'Access Key ID'.padEnd(23)}</Text>
+            <Text bold>{'Created (UTC)'.padEnd(19)}</Text>
+            <Text bold>Last Used (UTC)</Text>
           </Box>
           {bucketKeys.map((u, idx) => {
             const isSelected = idx === selectedKeyIndex;
@@ -158,23 +159,28 @@ const BucketKeysScreen = ({
             const roleColor = isSelected ? 'cyan' : u.role === 'put-only' ? 'yellow' : 'blue';
             const rowColor = isSelected ? 'cyan' : undefined;
             const userNameDisplay =
-              u.userName.length > 30 ? `${u.userName.slice(0, 27)}...` : u.userName;
+              u.userName.length > 26 ? `${u.userName.slice(0, 23)}...` : u.userName;
             const keySummary =
               u.accessKeys.length === 0
                 ? '(no active key)'
                 : u.accessKeys.map((k) => k.accessKeyId).join(', ');
             const keyDisplay =
-              keySummary.length > 24 ? `${keySummary.slice(0, 21)}...` : keySummary;
+              keySummary.length > 21 ? `${keySummary.slice(0, 18)}...` : keySummary;
+            const createdDisplay = u.accessKeys[0]?.createDate || u.createdAt || '-';
+            const lastUsedDisplay = u.accessKeys[0]?.lastUsedDate || u.lastUsedAt || 'Never';
 
             return (
               <Box key={u.userName}>
                 <Text color={roleColor} bold={isSelected}>
                   {isSelected ? '▸ ' : '  '}
-                  {roleTag.padEnd(10)}
+                  {roleTag.padEnd(9)}
                 </Text>
-                <Text color={rowColor}>{userNameDisplay.padEnd(32)}</Text>
-                <Text color={rowColor}>{keyDisplay.padEnd(26)}</Text>
-                <Text color={rowColor}>{u.createdAt}</Text>
+                <Text color={rowColor}>{userNameDisplay.padEnd(28)}</Text>
+                <Text color={rowColor}>{keyDisplay.padEnd(23)}</Text>
+                <Text color={rowColor}>{createdDisplay.padEnd(19)}</Text>
+                <Text color={rowColor} dimColor={!isSelected && lastUsedDisplay === 'Never'}>
+                  {lastUsedDisplay}
+                </Text>
               </Box>
             );
           })}
