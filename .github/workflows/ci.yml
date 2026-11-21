@@ -123,6 +123,17 @@ jobs:
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Cache Cargo.lock (locks dependency versions & ensures rust-cache restore/save keys match)
+        id: cache-cargo-lock
+        uses: actions/cache@v6
+        with:
+          path: desktop/src-tauri/Cargo.lock
+          key: cargo-lock-${{ hashFiles('desktop/src-tauri/Cargo.toml') }}
+
+      - name: Generate Cargo.lock before rust-cache if not cached
+        if: steps.cache-cargo-lock.outputs.cache-hit != 'true'
+        run: cargo generate-lockfile --manifest-path desktop/src-tauri/Cargo.toml
+
       - name: Setup sccache
         uses: mozilla-actions/sccache-action@v0.0.11
 
@@ -130,9 +141,9 @@ jobs:
         uses: actions/cache@v6
         with:
           path: ${{ runner.temp }}/sccache-cache
-          key: ${{ runner.os }}-sccache-${{ hashFiles('desktop/src-tauri/Cargo.toml', 'desktop/src-tauri/Cargo.lock') }}-${{ hashFiles('desktop/src-tauri/src/**') }}
+          key: ${{ runner.os }}-sccache-${{ hashFiles('desktop/src-tauri/Cargo.toml', 'desktop/src-tauri/src/**') }}
           restore-keys: |
-            ${{ runner.os }}-sccache-${{ hashFiles('desktop/src-tauri/Cargo.toml', 'desktop/src-tauri/Cargo.lock') }}-
+            ${{ runner.os }}-sccache-${{ hashFiles('desktop/src-tauri/Cargo.toml') }}-
             ${{ runner.os }}-sccache-
 
       - name: Cache Rust target artifacts
