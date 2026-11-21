@@ -1,7 +1,8 @@
 use crate::aws_client::build_sdk_config;
 use crate::route53::{
-    check_dkim_records_in_list, list_dns_records, load_all_zones_across_profiles,
-    match_domain_in_zones, upsert_dkim_cname_records, DnsRecordDto,
+    check_dkim_records_in_list, check_dmarc_record_in_list, extract_domain_from_identity,
+    list_dns_records, load_all_zones_across_profiles, match_domain_in_zones,
+    upsert_ses_dns_records, DnsRecordDto,
 };
 use aws_sdk_sesv2::error::{DisplayErrorContext, ProvideErrorMetadata};
 use aws_sdk_sesv2::Client;
@@ -22,10 +23,13 @@ pub struct SesIdentityDto {
     pub identity_name: String,
     pub identity_type: String,
     pub type_label: String,
+    pub domain: String,
     pub verification_status: String,
     pub dkim_status: String,
     pub dkim_tokens: Vec<String>,
     pub dkim_records_published: bool,
+    pub dmarc_record_published: bool,
+    pub dns_records_published: bool,
     pub sending_enabled: bool,
     pub matched_zone_id: Option<String>,
     pub matched_zone_name: Option<String>,
@@ -65,10 +69,7 @@ pub async fn list_ses_identities(profile: &str) -> Result<Vec<SesIdentityDto>, S
         }
     }
 
-    let has_domains = raw_identities
-        .iter()
-        .any(|i| i.identity_type().map(|t| t.as_str()) == Some("DOMAIN"));
-    let all_zones = if has_domains {
+    let all_zones = if !raw_identities.is_empty() {
         load_all_zones_across_profiles(profile).await
     } else {
         Vec::new()
@@ -85,6 +86,7 @@ pub async fn list_ses_identities(profile: &str) -> Result<Vec<SesIdentityDto>, S
             .identity_type()
             .map(|t| t.as_str().to_string())
             .unwrap_or_else(|| "EMAIL_ADDRESS".to_string());
+        let domain = extract_domain_from_identity(&identity_name);
         let mut verification_status = item
             .verification_status()
             .map(|s| s.as_str().to_string())
@@ -109,43 +111,51 @@ pub async fn list_ses_identities(profile: &str) -> Result<Vec<SesIdentityDto>, S
             }
         }
 
-        let matched_zone = if identity_type == "DOMAIN" {
-            match_domain_in_zones(&identity_name, &all_zones)
-        } else {
-            None
-        };
+        let matched_zone = match_domain_in_zones(&domain, &all_zones);
 
-        let mut dkim_records_published = dkim_status == "SUCCESS";
-        if !dkim_records_published && !dkim_tokens.is_empty() {
-            if let Some(mz) = &matched_zone {
-                let records = if let Some(cached) = zone_records_cache.get(&mz.zone_id) {
-                    cached.clone()
-                } else {
-                    let fetched =
-                        list_dns_records(&mz.profile, &mz.zone_id, &mz.zone_name)
-                            .await
-                            .unwrap_or_default();
-                    zone_records_cache.insert(mz.zone_id.clone(), fetched.clone());
-                    fetched
-                };
+        let mut dkim_records_published = identity_type != "DOMAIN" || dkim_status == "SUCCESS";
+        let mut dmarc_record_published = false;
+
+        if let Some(mz) = &matched_zone {
+            let records = if let Some(cached) = zone_records_cache.get(&mz.zone_id) {
+                cached.clone()
+            } else {
+                let fetched = list_dns_records(&mz.profile, &mz.zone_id, &mz.zone_name)
+                    .await
+                    .unwrap_or_default();
+                zone_records_cache.insert(mz.zone_id.clone(), fetched.clone());
+                fetched
+            };
+
+            if !dkim_records_published && !dkim_tokens.is_empty() {
                 dkim_records_published = check_dkim_records_in_list(
-                    &identity_name,
+                    &domain,
                     &mz.zone_name,
                     &dkim_tokens,
                     &records,
                 );
             }
+            dmarc_record_published = check_dmarc_record_in_list(&domain, &mz.zone_name, &records);
         }
+
+        let dns_records_published = if identity_type == "DOMAIN" {
+            dkim_records_published && dmarc_record_published
+        } else {
+            dmarc_record_published && (dkim_tokens.is_empty() || dkim_records_published)
+        };
 
         let type_label = format_type_label(&identity_type).to_string();
         identities.push(SesIdentityDto {
             identity_name,
             identity_type,
             type_label,
+            domain,
             verification_status,
             dkim_status,
             dkim_tokens,
             dkim_records_published,
+            dmarc_record_published,
+            dns_records_published,
             sending_enabled: item.sending_enabled(),
             matched_zone_id: matched_zone.as_ref().map(|z| z.zone_id.clone()),
             matched_zone_name: matched_zone.as_ref().map(|z| z.zone_name.clone()),
@@ -186,42 +196,51 @@ pub async fn create_ses_identity(profile: &str, identity_name: &str) -> Result<S
             )
         })?;
 
-    // If this is a domain identity and we own its Route53 hosted zone, automatically publish the DKIM CNAME records
-    if !trimmed.contains('@') {
-        let mut tokens: Vec<String> = resp
-            .dkim_attributes()
-            .map(|d| d.tokens().to_vec())
-            .unwrap_or_default();
+    let domain = extract_domain_from_identity(trimmed);
+    let mut tokens: Vec<String> = resp
+        .dkim_attributes()
+        .map(|d| d.tokens().to_vec())
+        .unwrap_or_default();
 
-        if tokens.is_empty() {
-            if let Ok(detail) = client
-                .get_email_identity()
-                .email_identity(trimmed)
-                .send()
-                .await
-            {
-                if let Some(dkim) = detail.dkim_attributes() {
-                    tokens = dkim.tokens().to_vec();
-                }
+    if tokens.is_empty() && !trimmed.contains('@') {
+        if let Ok(detail) = client
+            .get_email_identity()
+            .email_identity(trimmed)
+            .send()
+            .await
+        {
+            if let Some(dkim) = detail.dkim_attributes() {
+                tokens = dkim.tokens().to_vec();
             }
         }
+    }
 
-        if !tokens.is_empty() {
-            let all_zones = load_all_zones_across_profiles(profile).await;
-            if let Some(matched) = match_domain_in_zones(trimmed, &all_zones) {
-                if let Ok(count) = upsert_dkim_cname_records(
-                    &matched.profile,
-                    &matched.zone_id,
-                    trimmed,
-                    &tokens,
-                )
+    let all_zones = load_all_zones_across_profiles(profile).await;
+    if let Some(matched) = match_domain_in_zones(&domain, &all_zones) {
+        let existing_records =
+            list_dns_records(&matched.profile, &matched.zone_id, &matched.zone_name)
                 .await
-                {
-                    return Ok(format!(
-                        "Created SES domain \"{}\" and automatically published {} DKIM CNAME records to Route53 zone \"{}\" ({}).",
-                        trimmed, count, matched.zone_name, matched.profile
-                    ));
-                }
+                .unwrap_or_default();
+        let need_dmarc = !check_dmarc_record_in_list(&domain, &matched.zone_name, &existing_records);
+
+        if !tokens.is_empty() || need_dmarc {
+            if let Ok(count) = upsert_ses_dns_records(
+                &matched.profile,
+                &matched.zone_id,
+                &domain,
+                &tokens,
+                need_dmarc,
+            )
+            .await
+            {
+                return Ok(format!(
+                    "Created SES identity \"{}\" and automatically published {} DNS record{} (DKIM/DMARC) to Route53 zone \"{}\" ({}).",
+                    trimmed,
+                    count,
+                    if count == 1 { "" } else { "s" },
+                    matched.zone_name,
+                    matched.profile
+                ));
             }
         }
     }
@@ -236,52 +255,59 @@ pub async fn publish_ses_dkim_records(
 ) -> Result<String, String> {
     let trimmed = domain.trim();
     if trimmed.is_empty() {
-        return Err("Domain name is required.".to_string());
+        return Err("Identity or domain name is required.".to_string());
     }
+    let clean_domain = extract_domain_from_identity(trimmed);
 
     let mut tokens = dkim_tokens;
-    if tokens.is_empty() {
+    if tokens.is_empty() && !trimmed.contains('@') {
         let config = build_sdk_config(profile, None).await?;
         let client = Client::new(&config);
-        let detail = client
+        if let Ok(detail) = client
             .get_email_identity()
             .email_identity(trimmed)
             .send()
             .await
-            .map_err(|e| {
-                format!(
-                    "Failed to fetch DKIM tokens for \"{}\": {}",
-                    trimmed,
-                    format_aws_err(&e)
-                )
-            })?;
-        tokens = detail
-            .dkim_attributes()
-            .map(|d| d.tokens().to_vec())
-            .unwrap_or_default();
-    }
-
-    if tokens.is_empty() {
-        return Err(format!(
-            "No Easy DKIM tokens found for domain \"{}\".",
-            trimmed
-        ));
+        {
+            tokens = detail
+                .dkim_attributes()
+                .map(|d| d.tokens().to_vec())
+                .unwrap_or_default();
+        }
     }
 
     let all_zones = load_all_zones_across_profiles(profile).await;
-    let matched = match_domain_in_zones(trimmed, &all_zones).ok_or_else(|| {
+    let matched = match_domain_in_zones(&clean_domain, &all_zones).ok_or_else(|| {
         format!(
             "No matching Route53 hosted zone found for \"{}\" in any configured AWS account.",
-            trimmed
+            clean_domain
         )
     })?;
 
-    let count =
-        upsert_dkim_cname_records(&matched.profile, &matched.zone_id, trimmed, &tokens).await?;
+    let existing_records =
+        list_dns_records(&matched.profile, &matched.zone_id, &matched.zone_name)
+            .await
+            .unwrap_or_default();
+    let need_dmarc =
+        !check_dmarc_record_in_list(&clean_domain, &matched.zone_name, &existing_records);
+    let include_dmarc = need_dmarc || tokens.is_empty();
+
+    let count = upsert_ses_dns_records(
+        &matched.profile,
+        &matched.zone_id,
+        &clean_domain,
+        &tokens,
+        include_dmarc,
+    )
+    .await?;
 
     Ok(format!(
-        "Published {} DKIM CNAME records for \"{}\" to Route53 zone \"{}\" ({}).",
-        count, trimmed, matched.zone_name, matched.profile
+        "Published {} SES DNS record{} (DKIM/DMARC) for \"{}\" to Route53 zone \"{}\" ({}).",
+        count,
+        if count == 1 { "" } else { "s" },
+        clean_domain,
+        matched.zone_name,
+        matched.profile
     ))
 }
 

@@ -60,6 +60,35 @@ pub fn full_record_name(name: &str, zone_name: &str) -> String {
     }
 }
 
+pub fn extract_domain_from_identity(identity: &str) -> String {
+    let trimmed = identity.trim().trim_end_matches('.');
+    if let Some((_, domain)) = trimmed.rsplit_once('@') {
+        domain.to_string()
+    } else {
+        trimmed.to_string()
+    }
+}
+
+pub fn check_dmarc_record_in_list(
+    domain: &str,
+    zone_name: &str,
+    records: &[DnsRecordDto],
+) -> bool {
+    let clean_domain = extract_domain_from_identity(domain).to_ascii_lowercase();
+    if clean_domain.is_empty() {
+        return false;
+    }
+    let expected_fqdn = format!("_dmarc.{}", clean_domain);
+    records.iter().any(|r| {
+        r.record_type == "TXT"
+            && full_record_name(&r.name, zone_name)
+                .trim_end_matches('.')
+                .to_ascii_lowercase()
+                == expected_fqdn
+            && r.value.to_ascii_lowercase().contains("v=dmarc1")
+    })
+}
+
 pub fn check_dkim_records_in_list(
     domain: &str,
     zone_name: &str,
@@ -69,7 +98,7 @@ pub fn check_dkim_records_in_list(
     if dkim_tokens.is_empty() {
         return false;
     }
-    let clean_domain = domain.trim().trim_end_matches('.').to_ascii_lowercase();
+    let clean_domain = extract_domain_from_identity(domain).to_ascii_lowercase();
     dkim_tokens.iter().all(|token| {
         let trimmed_token = token.trim().to_ascii_lowercase();
         if trimmed_token.is_empty() {
@@ -319,19 +348,19 @@ pub fn match_domain_in_zones(
     })
 }
 
-pub async fn upsert_dkim_cname_records(
+pub async fn upsert_ses_dns_records(
     zone_profile: &str,
     zone_id: &str,
     domain: &str,
     dkim_tokens: &[String],
+    include_dmarc: bool,
 ) -> Result<usize, String> {
-    if dkim_tokens.is_empty() {
-        return Err(format!("No DKIM tokens found for domain \"{}\".", domain));
-    }
-
     let config = build_sdk_config(zone_profile, Some("us-east-1")).await?;
     let client = Client::new(&config);
-    let clean_domain = domain.trim().trim_end_matches('.');
+    let clean_domain = extract_domain_from_identity(domain);
+    if clean_domain.is_empty() {
+        return Err("Domain name cannot be empty.".to_string());
+    }
 
     let mut changes = Vec::new();
     for token in dkim_tokens {
@@ -364,11 +393,39 @@ pub async fn upsert_dkim_cname_records(
         changes.push(change);
     }
 
+    if include_dmarc {
+        let dmarc_fqdn = format!("_dmarc.{}.", clean_domain);
+        let dmarc_rr = ResourceRecord::builder()
+            .value("\"v=DMARC1; p=none;\"")
+            .build()
+            .map_err(|e| format!("Invalid DMARC record value: {}", e))?;
+
+        let dmarc_rrs = ResourceRecordSet::builder()
+            .name(dmarc_fqdn)
+            .r#type(RrType::Txt)
+            .ttl(300)
+            .resource_records(dmarc_rr)
+            .build()
+            .map_err(|e| format!("Invalid DMARC record set: {}", e))?;
+
+        let dmarc_change = Change::builder()
+            .action(ChangeAction::Upsert)
+            .resource_record_set(dmarc_rrs)
+            .build()
+            .map_err(|e| format!("Invalid DMARC change: {}", e))?;
+
+        changes.push(dmarc_change);
+    }
+
+    if changes.is_empty() {
+        return Err(format!("No DNS records to publish for \"{}\".", clean_domain));
+    }
+
     let count = changes.len();
     let batch = ChangeBatch::builder()
         .set_changes(Some(changes))
         .build()
-        .map_err(|e| format!("Invalid DKIM change batch: {}", e))?;
+        .map_err(|e| format!("Invalid DNS change batch: {}", e))?;
 
     client
         .change_resource_record_sets()
@@ -376,7 +433,7 @@ pub async fn upsert_dkim_cname_records(
         .change_batch(batch)
         .send()
         .await
-        .map_err(|e| format!("Failed publishing DKIM CNAME records to Route53: {}", e))?;
+        .map_err(|e| format!("Failed publishing SES DNS records to Route53: {}", e))?;
 
     Ok(count)
 }

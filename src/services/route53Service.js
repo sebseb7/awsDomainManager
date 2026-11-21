@@ -244,6 +244,39 @@ export const matchDomainInZones = (domain, allZones) => {
 };
 
 /**
+ * Extract the domain portion of an SES identity (either a domain or email@domain)
+ * @param {string} identity
+ * @returns {string}
+ */
+export const extractDomainFromIdentity = (identity) => {
+  const trimmed = (identity || '').trim().replace(/\.$/, '');
+  const atIdx = trimmed.lastIndexOf('@');
+  return atIdx >= 0 ? trimmed.slice(atIdx + 1) : trimmed;
+};
+
+/**
+ * Check whether a DMARC TXT record (_dmarc.<domain>) already exists in a Route53 zone's records
+ * @param {string} domain
+ * @param {string} zoneName
+ * @param {Array<{ name: string, type: string, value: string }>} records
+ * @returns {boolean}
+ */
+export const checkDmarcRecordInList = (domain, zoneName, records) => {
+  const cleanDomain = extractDomainFromIdentity(domain).toLowerCase();
+  const cleanZone = (zoneName || '').trim().replace(/\.$/, '').toLowerCase();
+  if (!cleanDomain || !cleanZone) return false;
+  const expectedFqdn = `_dmarc.${cleanDomain}`;
+  return (records || []).some((r) => {
+    if (r.type !== 'TXT') return false;
+    const recFqdn =
+      !r.name || r.name === '@'
+        ? cleanZone
+        : `${r.name.toLowerCase()}.${cleanZone}`;
+    return recFqdn === expectedFqdn && (r.value || '').toLowerCase().includes('v=dmarc1');
+  });
+};
+
+/**
  * Check whether all Easy DKIM CNAME records for a domain already exist in a Route53 zone's records
  * @param {string} domain
  * @param {string} zoneName
@@ -253,7 +286,7 @@ export const matchDomainInZones = (domain, allZones) => {
  */
 export const checkDkimRecordsInList = (domain, zoneName, dkimTokens, records) => {
   if (!dkimTokens || dkimTokens.length === 0) return false;
-  const cleanDomain = (domain || '').trim().replace(/\.$/, '').toLowerCase();
+  const cleanDomain = extractDomainFromIdentity(domain).toLowerCase();
   const cleanZone = (zoneName || '').trim().replace(/\.$/, '').toLowerCase();
   return dkimTokens.every((token) => {
     const t = (token || '').trim().toLowerCase();
@@ -271,20 +304,27 @@ export const checkDkimRecordsInList = (domain, zoneName, dkimTokens, records) =>
 };
 
 /**
- * Upsert Easy DKIM CNAME records for a domain into a Route53 hosted zone
+ * Upsert Easy DKIM CNAME records and/or DMARC TXT record for a domain into a Route53 hosted zone
  * @param {Object} zoneAccount
  * @param {string} zoneId
  * @param {string} domain
  * @param {Array<string>} dkimTokens
- * @returns {Promise<number>} Number of CNAME records upserted
+ * @param {boolean} [includeDmarc=true]
+ * @returns {Promise<number>} Number of DNS records upserted
  */
-export const upsertDkimCnameRecords = async (zoneAccount, zoneId, domain, dkimTokens) => {
-  const validTokens = (dkimTokens || []).map((t) => t.trim()).filter(Boolean);
-  if (validTokens.length === 0) {
-    throw new Error(`No DKIM tokens available for "${domain}".`);
+export const upsertSesDnsRecords = async (
+  zoneAccount,
+  zoneId,
+  domain,
+  dkimTokens = [],
+  includeDmarc = true
+) => {
+  const cleanDomain = extractDomainFromIdentity(domain);
+  if (!cleanDomain) {
+    throw new Error('Domain name is required.');
   }
 
-  const cleanDomain = domain.trim().replace(/\.$/, '');
+  const validTokens = (dkimTokens || []).map((t) => t.trim()).filter(Boolean);
   const changes = validTokens.map((token) => ({
     Action: 'UPSERT',
     ResourceRecordSet: {
@@ -294,6 +334,22 @@ export const upsertDkimCnameRecords = async (zoneAccount, zoneId, domain, dkimTo
       ResourceRecords: [{ Value: `${token}.dkim.amazonses.com` }],
     },
   }));
+
+  if (includeDmarc) {
+    changes.push({
+      Action: 'UPSERT',
+      ResourceRecordSet: {
+        Name: `_dmarc.${cleanDomain}.`,
+        Type: 'TXT',
+        TTL: 300,
+        ResourceRecords: [{ Value: '"v=DMARC1; p=none;"' }],
+      },
+    });
+  }
+
+  if (changes.length === 0) {
+    throw new Error(`No DNS records to publish for "${cleanDomain}".`);
+  }
 
   try {
     const client = createRoute53Client(zoneAccount);
@@ -305,6 +361,6 @@ export const upsertDkimCnameRecords = async (zoneAccount, zoneId, domain, dkimTo
     );
     return changes.length;
   } catch (err) {
-    throw new Error(`Failed publishing DKIM CNAME records to Route53: ${err.message}`);
+    throw new Error(`Failed publishing SES DNS records to Route53: ${err.message}`);
   }
 };

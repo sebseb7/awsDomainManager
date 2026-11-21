@@ -99,10 +99,13 @@ export interface SesIdentity {
   identityName: string;
   identityType: 'DOMAIN' | 'EMAIL_ADDRESS' | 'MANAGED_DOMAIN' | string;
   typeLabel: string;
+  domain?: string;
   verificationStatus: string;
   dkimStatus: string;
   dkimTokens?: string[];
   dkimRecordsPublished?: boolean;
+  dmarcRecordPublished?: boolean;
+  dnsRecordsPublished?: boolean;
   sendingEnabled: boolean;
   matchedZoneId?: string | null;
   matchedZoneName?: string | null;

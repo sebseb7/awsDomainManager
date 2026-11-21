@@ -800,10 +800,6 @@ const CLI = () => {
   const publishSesDkim = async () => {
     const target = sesIdentities[selectedSesIndex];
     if (!selectedAccount || !target) return;
-    if (target.identityType !== 'DOMAIN') {
-      setError('Select a Domain identity to publish Easy DKIM CNAME records to Route53.');
-      return;
-    }
     setLoading(true);
     setError(null);
     try {
@@ -984,10 +980,6 @@ const CLI = () => {
       if (screen === 'ses-identities') {
         const target = sesIdentities[selectedSesIndex];
         if (!target) return;
-        if (target.identityType !== 'DOMAIN') {
-          setError('Select a Domain identity to view Easy DKIM CNAME records.');
-          return;
-        }
         setError(null);
         setStatusMessage(null);
         setShowSesDkimModal(true);

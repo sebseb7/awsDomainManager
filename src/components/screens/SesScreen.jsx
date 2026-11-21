@@ -2,6 +2,13 @@ import React from 'react';
 import { Box, Text, useInput } from 'ink';
 import TextInput from 'ink-text-input';
 
+const getIdentityDomain = (identity) => {
+  if (identity?.domain) return identity.domain;
+  const trimmed = (identity?.identityName || '').trim().replace(/\.$/, '');
+  const atIdx = trimmed.lastIndexOf('@');
+  return atIdx >= 0 ? trimmed.slice(atIdx + 1) : trimmed;
+};
+
 const AddSesIdentityForm = ({ identityInput, setIdentityInput, onSubmit, onCancel }) => {
   useInput((input, key) => {
     if (key.escape) {
@@ -27,7 +34,7 @@ const AddSesIdentityForm = ({ identityInput, setIdentityInput, onSubmit, onCance
       </Box>
       <Box marginTop={1}>
         <Text dimColor>
-          If the domain matches a Route53 zone in your accounts, its 3 Easy DKIM CNAME records are published automatically.
+          If the domain matches a Route53 zone in your accounts, its DKIM CNAME and DMARC TXT (_dmarc) records are published automatically.
         </Text>
       </Box>
       <Box marginTop={1}>
@@ -48,40 +55,39 @@ const DkimRecordsModal = ({ identity, onPublish, onClose }) => {
     }
   });
 
-  const cleanDomain = (identity.identityName || '').replace(/\.$/, '');
+  const cleanDomain = getIdentityDomain(identity);
   const tokens = identity.dkimTokens || [];
 
   return (
     <Box flexDirection="column" borderStyle="round" borderColor="cyan" padding={1}>
       <Text bold color="cyan">
-        Easy DKIM CNAME Records for &quot;{identity.identityName}&quot;
+        SES DNS Records (DKIM &amp; DMARC) for &quot;{identity.identityName}&quot;
         {identity.matchedZoneName
           ? ` (Route53 zone: ${identity.matchedZoneName} on ${identity.matchedZoneProfile})`
           : ''}
       </Text>
-      {tokens.length === 0 ? (
-        <Box marginTop={1}>
-          <Text dimColor>No Easy DKIM tokens available for this identity.</Text>
+      <Box flexDirection="column" marginTop={1}>
+        <Box>
+          <Text bold>{'Type'.padEnd(7)}</Text>
+          <Text bold>{'Name'.padEnd(56)}</Text>
+          <Text bold>Value</Text>
         </Box>
-      ) : (
-        <Box flexDirection="column" marginTop={1}>
-          <Box>
-            <Text bold>{'Type'.padEnd(7)}</Text>
-            <Text bold>{'Name'.padEnd(56)}</Text>
-            <Text bold>Value</Text>
+        {tokens.map((token) => (
+          <Box key={token}>
+            <Text color="yellow">{'CNAME'.padEnd(7)}</Text>
+            <Text color="cyan">{`${token}._domainkey.${cleanDomain}`.padEnd(56)}</Text>
+            <Text>{`${token}.dkim.amazonses.com`}</Text>
           </Box>
-          {tokens.map((token) => (
-            <Box key={token}>
-              <Text color="yellow">{'CNAME'.padEnd(7)}</Text>
-              <Text color="cyan">{`${token}._domainkey.${cleanDomain}`.padEnd(56)}</Text>
-              <Text>{`${token}.dkim.amazonses.com`}</Text>
-            </Box>
-          ))}
+        ))}
+        <Box>
+          <Text color="green">{'TXT'.padEnd(7)}</Text>
+          <Text color="cyan">{`_dmarc.${cleanDomain}`.padEnd(56)}</Text>
+          <Text>&quot;v=DMARC1; p=none;&quot;</Text>
         </Box>
-      )}
+      </Box>
       <Box marginTop={1}>
         <Text dimColor>
-          Press &apos;p&apos; to publish these CNAME records to Route53, or Enter/Esc to close
+          Press &apos;p&apos; to publish missing DKIM/DMARC records to Route53, or Enter/Esc to close
         </Text>
       </Box>
     </Box>
@@ -182,8 +188,9 @@ const SesScreen = ({
           <Box>
             <Text bold>{'  '}{'Type'.padEnd(11)}</Text>
             <Text bold>{'Identity (Domain / Email)'.padEnd(36)}</Text>
-            <Text bold>{'Verification'.padEnd(16)}</Text>
-            <Text bold>{'DKIM'.padEnd(14)}</Text>
+            <Text bold>{'Verification'.padEnd(14)}</Text>
+            <Text bold>{'DKIM'.padEnd(12)}</Text>
+            <Text bold>{'DMARC'.padEnd(12)}</Text>
             <Text bold>Sending</Text>
           </Box>
           {sesIdentities.map((item, idx) => {
@@ -193,7 +200,11 @@ const SesScreen = ({
             const typeColor = isSelected ? 'cyan' : isDomain ? 'yellow' : 'blue';
             const rowColor = isSelected ? 'cyan' : undefined;
             const alreadyPublished =
-              Boolean(item.dkimRecordsPublished) || item.dkimStatus === 'SUCCESS';
+              typeof item.dnsRecordsPublished === 'boolean'
+                ? item.dnsRecordsPublished
+                : isDomain
+                  ? Boolean(item.dkimRecordsPublished) && Boolean(item.dmarcRecordPublished)
+                  : Boolean(item.dmarcRecordPublished);
             const nameWithR53 = item.matchedZoneName
               ? `${item.identityName} ${alreadyPublished ? '[R53 OK]' : '[R53 !]'}`
               : item.identityName;
@@ -215,6 +226,12 @@ const SesScreen = ({
                 : item.dkimStatus === 'PENDING'
                   ? 'yellow'
                   : undefined;
+            const dmarcText = item.dmarcRecordPublished ? 'Published' : 'Missing';
+            const dmarcColor = isSelected
+              ? 'cyan'
+              : item.dmarcRecordPublished
+                ? 'green'
+                : 'yellow';
 
             return (
               <Box key={item.identityName}>
@@ -223,10 +240,11 @@ const SesScreen = ({
                   {typeTag.padEnd(11)}
                 </Text>
                 <Text color={rowColor}>{nameDisplay.padEnd(36)}</Text>
-                <Text color={verColor}>{(item.verificationStatus || '-').padEnd(16)}</Text>
+                <Text color={verColor}>{(item.verificationStatus || '-').padEnd(14)}</Text>
                 <Text color={dkimColor} dimColor={!isSelected && item.dkimStatus === '-'}>
-                  {(item.dkimStatus || '-').padEnd(14)}
+                  {(item.dkimStatus || '-').padEnd(12)}
                 </Text>
+                <Text color={dmarcColor}>{dmarcText.padEnd(12)}</Text>
                 <Text
                   color={isSelected ? 'cyan' : item.sendingEnabled ? 'green' : undefined}
                   dimColor={!isSelected && !item.sendingEnabled}
@@ -243,7 +261,7 @@ const SesScreen = ({
         <Box marginTop={1}>
           <Text dimColor>
             {sesIdentities.length > 0
-              ? 'Use ↑/↓ arrows, p to publish DKIM CNAMEs to Route53, v/Enter to view DKIM records, a to add, d to delete, or Esc to go back'
+              ? 'Use ↑/↓ arrows, p to publish DKIM/DMARC to Route53, v/Enter to view DNS records, a to add, d to delete, or Esc to go back'
               : 'Press a to add a domain or email identity, or Esc to go back'}
           </Text>
         </Box>

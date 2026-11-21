@@ -10,8 +10,10 @@ import {
   loadRecords,
   loadAllZonesAcrossAccounts,
   matchDomainInZones,
+  extractDomainFromIdentity,
   checkDkimRecordsInList,
-  upsertDkimCnameRecords,
+  checkDmarcRecordInList,
+  upsertSesDnsRecords,
 } from './route53Service.js';
 
 const createSesClient = (account) => {
@@ -51,10 +53,10 @@ export const loadSesIdentities = async (account, allAccounts = []) => {
       nextToken = resp.NextToken;
     } while (nextToken);
 
-    const hasDomains = rawIdentities.some((i) => i.IdentityType === 'DOMAIN');
-    const allZones = hasDomains
-      ? await loadAllZonesAcrossAccounts(account, allAccounts)
-      : [];
+    const allZones =
+      rawIdentities.length > 0
+        ? await loadAllZonesAcrossAccounts(account, allAccounts)
+        : [];
 
     const zoneRecordsCache = new Map();
     const identities = [];
@@ -62,6 +64,7 @@ export const loadSesIdentities = async (account, allAccounts = []) => {
       const identityName = item.IdentityName || '';
       if (!identityName) continue;
       const identityType = item.IdentityType || 'EMAIL_ADDRESS';
+      const domain = extractDomainFromIdentity(identityName);
       let verificationStatus = item.VerificationStatus || 'UNKNOWN';
       let dkimStatus = '-';
       let dkimTokens = [];
@@ -83,11 +86,12 @@ export const loadSesIdentities = async (account, allAccounts = []) => {
         // Ignore if GetEmailIdentity permission is not granted
       }
 
-      const matched =
-        identityType === 'DOMAIN' ? matchDomainInZones(identityName, allZones) : null;
+      const matched = matchDomainInZones(domain, allZones);
 
-      let dkimRecordsPublished = dkimStatus === 'SUCCESS';
-      if (!dkimRecordsPublished && matched && dkimTokens.length > 0) {
+      let dkimRecordsPublished = identityType !== 'DOMAIN' || dkimStatus === 'SUCCESS';
+      let dmarcRecordPublished = false;
+
+      if (matched) {
         const zId = matched.zone.Id;
         let records = zoneRecordsCache.get(zId);
         if (!records) {
@@ -98,22 +102,33 @@ export const loadSesIdentities = async (account, allAccounts = []) => {
           }
           zoneRecordsCache.set(zId, records);
         }
-        dkimRecordsPublished = checkDkimRecordsInList(
-          identityName,
-          matched.zone.Name,
-          dkimTokens,
-          records
-        );
+        if (!dkimRecordsPublished && dkimTokens.length > 0) {
+          dkimRecordsPublished = checkDkimRecordsInList(
+            domain,
+            matched.zone.Name,
+            dkimTokens,
+            records
+          );
+        }
+        dmarcRecordPublished = checkDmarcRecordInList(domain, matched.zone.Name, records);
       }
+
+      const dnsRecordsPublished =
+        identityType === 'DOMAIN'
+          ? dkimRecordsPublished && dmarcRecordPublished
+          : dmarcRecordPublished && (dkimTokens.length === 0 || dkimRecordsPublished);
 
       identities.push({
         identityName,
         identityType,
         typeLabel: formatTypeLabel(identityType),
+        domain,
         verificationStatus,
         dkimStatus,
         dkimTokens,
         dkimRecordsPublished,
+        dmarcRecordPublished,
+        dnsRecordsPublished,
         sendingEnabled: Boolean(item.SendingEnabled),
         matchedZoneId: matched?.zone?.Id || null,
         matchedZoneName: matched?.zone?.Name || null,
@@ -135,7 +150,7 @@ export const loadSesIdentities = async (account, allAccounts = []) => {
 
 /**
  * Create (begin verification for) an Amazon SES domain or email identity.
- * If it is a domain and we own a matching Route53 hosted zone, automatically publishes the 3 DKIM CNAME records.
+ * If we own a matching Route53 hosted zone, automatically publishes its DKIM CNAME and/or DMARC TXT records.
  * @param {Object} account
  * @param {string} identityName
  * @param {Array<Object>} [allAccounts=[]]
@@ -154,35 +169,42 @@ export const createSesIdentity = async (account, identityName, allAccounts = [])
       })
     );
 
-    if (!trimmed.includes('@')) {
-      let tokens = resp.DkimAttributes?.Tokens || [];
-      if (tokens.length === 0) {
-        try {
-          const detail = await client.send(
-            new GetEmailIdentityCommand({ EmailIdentity: trimmed })
-          );
-          tokens = detail.DkimAttributes?.Tokens || [];
-        } catch {
-          tokens = [];
-        }
+    const domain = extractDomainFromIdentity(trimmed);
+    let tokens = resp.DkimAttributes?.Tokens || [];
+    if (tokens.length === 0 && !trimmed.includes('@')) {
+      try {
+        const detail = await client.send(
+          new GetEmailIdentityCommand({ EmailIdentity: trimmed })
+        );
+        tokens = detail.DkimAttributes?.Tokens || [];
+      } catch {
+        tokens = [];
       }
+    }
 
-      if (tokens.length > 0) {
-        const allZones = await loadAllZonesAcrossAccounts(account, allAccounts);
-        const matched = matchDomainInZones(trimmed, allZones);
-        if (matched) {
-          try {
-            const count = await upsertDkimCnameRecords(
-              matched.account,
-              matched.zone.Id,
-              trimmed,
-              tokens
-            );
-            return `Created SES domain "${trimmed}" and automatically published ${count} DKIM CNAME records to Route53 zone "${matched.zone.Name}" (${matched.account.profile}).`;
-          } catch {
-            // Fall through if Route53 write failed
-          }
+    const allZones = await loadAllZonesAcrossAccounts(account, allAccounts);
+    const matched = matchDomainInZones(domain, allZones);
+    if (matched) {
+      try {
+        let existingRecords = [];
+        try {
+          existingRecords = await loadRecords(matched.account, matched.zone);
+        } catch {
+          existingRecords = [];
         }
+        const needDmarc = !checkDmarcRecordInList(domain, matched.zone.Name, existingRecords);
+        if (tokens.length > 0 || needDmarc) {
+          const count = await upsertSesDnsRecords(
+            matched.account,
+            matched.zone.Id,
+            domain,
+            tokens,
+            needDmarc
+          );
+          return `Created SES identity "${trimmed}" and automatically published ${count} DNS record${count === 1 ? '' : 's'} (DKIM/DMARC) to Route53 zone "${matched.zone.Name}" (${matched.account.profile}).`;
+        }
+      } catch {
+        // Fall through if Route53 write failed
       }
     }
 
@@ -193,53 +215,64 @@ export const createSesIdentity = async (account, identityName, allAccounts = [])
 };
 
 /**
- * Publish Easy DKIM CNAME records for an existing SES domain identity to its matching Route53 hosted zone
+ * Publish Easy DKIM CNAME records and/or DMARC TXT record for an SES identity to its matching Route53 hosted zone
  * @param {Object} account
  * @param {Array<Object>} allAccounts
- * @param {string} domain
+ * @param {string} identityOrDomain
  * @param {Array<string>} [dkimTokens=[]]
  * @returns {Promise<string>}
  */
 export const publishSesDkimToRoute53 = async (
   account,
   allAccounts,
-  domain,
+  identityOrDomain,
   dkimTokens = []
 ) => {
-  const trimmed = (domain || '').trim();
+  const trimmed = (identityOrDomain || '').trim();
   if (!trimmed) {
-    throw new Error('Domain name is required.');
+    throw new Error('Identity or domain name is required.');
   }
+  const cleanDomain = extractDomainFromIdentity(trimmed);
 
-  let tokens = dkimTokens;
-  if (!tokens || tokens.length === 0) {
-    const client = createSesClient(account);
-    const detail = await client.send(
-      new GetEmailIdentityCommand({ EmailIdentity: trimmed })
-    );
-    tokens = detail.DkimAttributes?.Tokens || [];
-  }
-
-  if (tokens.length === 0) {
-    throw new Error(`No Easy DKIM tokens found for domain "${trimmed}".`);
+  let tokens = dkimTokens || [];
+  if (tokens.length === 0 && !trimmed.includes('@')) {
+    try {
+      const client = createSesClient(account);
+      const detail = await client.send(
+        new GetEmailIdentityCommand({ EmailIdentity: trimmed })
+      );
+      tokens = detail.DkimAttributes?.Tokens || [];
+    } catch {
+      tokens = [];
+    }
   }
 
   const allZones = await loadAllZonesAcrossAccounts(account, allAccounts);
-  const matched = matchDomainInZones(trimmed, allZones);
+  const matched = matchDomainInZones(cleanDomain, allZones);
   if (!matched) {
     throw new Error(
-      `No matching Route53 hosted zone found for "${trimmed}" in any configured AWS account.`
+      `No matching Route53 hosted zone found for "${cleanDomain}" in any configured AWS account.`
     );
   }
 
-  const count = await upsertDkimCnameRecords(
+  let existingRecords = [];
+  try {
+    existingRecords = await loadRecords(matched.account, matched.zone);
+  } catch {
+    existingRecords = [];
+  }
+  const needDmarc = !checkDmarcRecordInList(cleanDomain, matched.zone.Name, existingRecords);
+  const includeDmarc = needDmarc || tokens.length === 0;
+
+  const count = await upsertSesDnsRecords(
     matched.account,
     matched.zone.Id,
-    trimmed,
-    tokens
+    cleanDomain,
+    tokens,
+    includeDmarc
   );
 
-  return `Published ${count} DKIM CNAME records for "${trimmed}" to Route53 zone "${matched.zone.Name}" (${matched.account.profile}).`;
+  return `Published ${count} SES DNS record${count === 1 ? '' : 's'} (DKIM/DMARC) for "${cleanDomain}" to Route53 zone "${matched.zone.Name}" (${matched.account.profile}).`;
 };
 
 /**

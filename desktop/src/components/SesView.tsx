@@ -9,6 +9,13 @@ interface Props {
   onSuccess: (msg: string) => void;
 }
 
+const getIdentityDomain = (item: SesIdentity): string => {
+  if (item.domain) return item.domain;
+  const trimmed = item.identityName.trim().replace(/\.$/, '');
+  const atIdx = trimmed.lastIndexOf('@');
+  return atIdx >= 0 ? trimmed.slice(atIdx + 1) : trimmed;
+};
+
 export const SesView: React.FC<Props> = ({ account, onError, onSuccess }) => {
   const [identities, setIdentities] = useState<SesIdentity[]>([]);
   const [loading, setLoading] = useState(false);
@@ -18,7 +25,7 @@ export const SesView: React.FC<Props> = ({ account, onError, onSuccess }) => {
   const [showCreate, setShowCreate] = useState(false);
   const [newIdentityName, setNewIdentityName] = useState('');
   const [deleteTarget, setDeleteTarget] = useState<SesIdentity | null>(null);
-  const [dkimModalTarget, setDkimModalTarget] = useState<SesIdentity | null>(null);
+  const [dnsModalTarget, setDnsModalTarget] = useState<SesIdentity | null>(null);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
 
   const loadIdentities = async () => {
@@ -55,7 +62,7 @@ export const SesView: React.FC<Props> = ({ account, onError, onSuccess }) => {
     }
   };
 
-  const handlePublishDkim = async (item: SesIdentity) => {
+  const handlePublishDns = async (item: SesIdentity) => {
     setLoading(true);
     try {
       const msg = await api.publishSesDkimRecords(
@@ -104,6 +111,16 @@ export const SesView: React.FC<Props> = ({ account, onError, onSuccess }) => {
       return <span style={{ color: 'var(--text-muted)' }}>-</span>;
     }
     return <span className="badge">{status}</span>;
+  };
+
+  const isAllDnsPublished = (item: SesIdentity): boolean => {
+    if (typeof item.dnsRecordsPublished === 'boolean') {
+      return item.dnsRecordsPublished;
+    }
+    if (item.identityType === 'DOMAIN') {
+      return Boolean(item.dkimRecordsPublished) && Boolean(item.dmarcRecordPublished);
+    }
+    return Boolean(item.dmarcRecordPublished);
   };
 
   const domainCount = identities.filter((i) => i.identityType === 'DOMAIN').length;
@@ -172,6 +189,7 @@ export const SesView: React.FC<Props> = ({ account, onError, onSuccess }) => {
                   <th>Type</th>
                   <th>Verification</th>
                   <th>DKIM</th>
+                  <th>DMARC</th>
                   <th>Sending</th>
                   <th style={{ width: 250 }}>Actions</th>
                 </tr>
@@ -179,9 +197,7 @@ export const SesView: React.FC<Props> = ({ account, onError, onSuccess }) => {
               <tbody>
                 {filtered.map((item) => {
                   const isDomain = item.identityType === 'DOMAIN';
-                  const hasTokens = (item.dkimTokens?.length || 0) > 0;
-                  const alreadyPublished =
-                    Boolean(item.dkimRecordsPublished) || item.dkimStatus === 'SUCCESS';
+                  const alreadyPublished = isAllDnsPublished(item);
                   return (
                     <tr key={item.identityName}>
                       <td style={{ fontWeight: 600 }}>
@@ -198,7 +214,7 @@ export const SesView: React.FC<Props> = ({ account, onError, onSuccess }) => {
                               style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}
                               title={
                                 alreadyPublished
-                                  ? `DKIM CNAME records published in Route53 zone ${item.matchedZoneName} (${item.matchedZoneProfile || account.profile})`
+                                  ? `DKIM/DMARC DNS records published in Route53 zone ${item.matchedZoneName} (${item.matchedZoneProfile || account.profile})`
                                   : `Managed in Route53 zone ${item.matchedZoneName} (${item.matchedZoneProfile || account.profile})`
                               }
                             >
@@ -216,6 +232,13 @@ export const SesView: React.FC<Props> = ({ account, onError, onSuccess }) => {
                       <td>{renderStatusBadge(item.verificationStatus)}</td>
                       <td>{renderStatusBadge(item.dkimStatus)}</td>
                       <td>
+                        {item.dmarcRecordPublished ? (
+                          <span className="badge badge-green">Published</span>
+                        ) : (
+                          <span className="badge badge-type">Missing</span>
+                        )}
+                      </td>
+                      <td>
                         {item.sendingEnabled ? (
                           <span style={{ color: 'var(--green)', fontWeight: 500 }}>Enabled</span>
                         ) : (
@@ -224,24 +247,22 @@ export const SesView: React.FC<Props> = ({ account, onError, onSuccess }) => {
                       </td>
                       <td>
                         <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
-                          {isDomain && hasTokens && (
-                            <button
-                              className="btn btn-sm"
-                              title="View Easy DKIM CNAME Records"
-                              onClick={() => setDkimModalTarget(item)}
-                            >
-                              <Eye size={13} /> DNS
-                            </button>
-                          )}
-                          {isDomain && !alreadyPublished && (hasTokens || item.matchedZoneId) && (
+                          <button
+                            className="btn btn-sm"
+                            title="View DKIM & DMARC DNS Records"
+                            onClick={() => setDnsModalTarget(item)}
+                          >
+                            <Eye size={13} /> DNS
+                          </button>
+                          {!alreadyPublished && item.matchedZoneId && (
                             <button
                               className="btn btn-primary btn-sm"
                               title={
                                 item.matchedZoneName
-                                  ? `Publish 3 Easy DKIM CNAME records to Route53 zone ${item.matchedZoneName}`
-                                  : 'Publish Easy DKIM CNAME records to Route53'
+                                  ? `Publish missing DKIM/DMARC records to Route53 zone ${item.matchedZoneName}`
+                                  : 'Publish DKIM/DMARC records to Route53'
                               }
-                              onClick={() => handlePublishDkim(item)}
+                              onClick={() => handlePublishDns(item)}
                               disabled={loading}
                             >
                               <UploadCloud size={13} /> Publish R53
@@ -282,9 +303,10 @@ export const SesView: React.FC<Props> = ({ account, onError, onSuccess }) => {
                 />
               </div>
               <p style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>
-                If you add a domain that matches a Route53 hosted zone in your configured AWS
-                accounts, its 3 Easy DKIM <code className="mono">CNAME</code> records will be
-                published to Route53 automatically.
+                If the domain matches a Route53 hosted zone in your configured AWS accounts, its
+                Easy DKIM <code className="mono">CNAME</code> and DMARC{' '}
+                <code className="mono">TXT</code> (<code className="mono">_dmarc.&lt;domain&gt;</code>)
+                records will be published to Route53 automatically.
               </p>
             </div>
             <div className="modal-footer">
@@ -299,41 +321,48 @@ export const SesView: React.FC<Props> = ({ account, onError, onSuccess }) => {
         </div>
       )}
 
-      {dkimModalTarget && (
+      {dnsModalTarget && (
         <div className="modal-backdrop">
           <div className="modal modal-xl">
             <div className="modal-header">
               <h3>
-                Easy DKIM DNS Records — <span className="mono">{dkimModalTarget.identityName}</span>
+                SES DNS Records (DKIM &amp; DMARC) —{' '}
+                <span className="mono">{dnsModalTarget.identityName}</span>
               </h3>
-              <button className="btn btn-sm" onClick={() => setDkimModalTarget(null)}>
+              <button className="btn btn-sm" onClick={() => setDnsModalTarget(null)}>
                 <X size={14} />
               </button>
             </div>
             <div className="modal-body">
               <p style={{ fontSize: 13, color: 'var(--text-muted)' }}>
-                Publish these 3 <code className="mono">CNAME</code> records to verify Easy DKIM for{' '}
-                <strong style={{ color: 'var(--text)' }}>{dkimModalTarget.identityName}</strong>
-                {dkimModalTarget.matchedZoneName
-                  ? ` (detected in Route53 zone ${dkimModalTarget.matchedZoneName} on profile "${dkimModalTarget.matchedZoneProfile}"):`
+                DNS records for domain{' '}
+                <strong style={{ color: 'var(--text)' }}>
+                  {getIdentityDomain(dnsModalTarget)}
+                </strong>
+                {dnsModalTarget.matchedZoneName
+                  ? ` (Route53 zone ${dnsModalTarget.matchedZoneName} on profile "${dnsModalTarget.matchedZoneProfile}"):`
                   : ':'}
               </p>
               <div className="table-wrap">
                 <table>
                   <thead>
                     <tr>
+                      <th style={{ width: 90 }}>Purpose</th>
                       <th style={{ width: 70 }}>Type</th>
                       <th>Name</th>
                       <th>Value</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {(dkimModalTarget.dkimTokens || []).map((token) => {
-                      const cleanDom = dkimModalTarget.identityName.replace(/\.$/, '');
+                    {(dnsModalTarget.dkimTokens || []).map((token) => {
+                      const cleanDom = getIdentityDomain(dnsModalTarget);
                       const recName = `${token}._domainkey.${cleanDom}`;
                       const recVal = `${token}.dkim.amazonses.com`;
                       return (
                         <tr key={token}>
+                          <td>
+                            <span className="badge badge-blue">DKIM</span>
+                          </td>
                           <td>
                             <span className="badge badge-type">CNAME</span>
                           </td>
@@ -370,28 +399,72 @@ export const SesView: React.FC<Props> = ({ account, onError, onSuccess }) => {
                         </tr>
                       );
                     })}
+                    {(() => {
+                      const cleanDom = getIdentityDomain(dnsModalTarget);
+                      const dmarcName = `_dmarc.${cleanDom}`;
+                      const dmarcVal = '"v=DMARC1; p=none;"';
+                      return (
+                        <tr>
+                          <td>
+                            <span className="badge badge-green">DMARC</span>
+                          </td>
+                          <td>
+                            <span className="badge badge-type">TXT</span>
+                          </td>
+                          <td className="mono" style={{ fontSize: 12 }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                              <span style={{ wordBreak: 'break-all' }}>{dmarcName}</span>
+                              <button
+                                className="btn btn-sm"
+                                onClick={() => copyText('dmarc-name', dmarcName)}
+                              >
+                                {copiedKey === 'dmarc-name' ? (
+                                  <Check size={12} />
+                                ) : (
+                                  <Copy size={12} />
+                                )}
+                              </button>
+                            </div>
+                          </td>
+                          <td className="mono" style={{ fontSize: 12 }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                              <span style={{ wordBreak: 'break-all' }}>{dmarcVal}</span>
+                              <button
+                                className="btn btn-sm"
+                                onClick={() => copyText('dmarc-val', dmarcVal)}
+                              >
+                                {copiedKey === 'dmarc-val' ? (
+                                  <Check size={12} />
+                                ) : (
+                                  <Copy size={12} />
+                                )}
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })()}
                   </tbody>
                 </table>
               </div>
             </div>
             <div className="modal-footer">
-              <button className="btn" onClick={() => setDkimModalTarget(null)}>
+              <button className="btn" onClick={() => setDnsModalTarget(null)}>
                 Close
               </button>
-              {!dkimModalTarget.dkimRecordsPublished &&
-                dkimModalTarget.dkimStatus !== 'SUCCESS' && (
-                  <button
-                    className="btn btn-primary"
-                    onClick={async () => {
-                      const target = dkimModalTarget;
-                      setDkimModalTarget(null);
-                      await handlePublishDkim(target);
-                    }}
-                    disabled={loading}
-                  >
-                    <UploadCloud size={14} /> Publish CNAME Records to Route53
-                  </button>
-                )}
+              {!isAllDnsPublished(dnsModalTarget) && (
+                <button
+                  className="btn btn-primary"
+                  onClick={async () => {
+                    const target = dnsModalTarget;
+                    setDnsModalTarget(null);
+                    await handlePublishDns(target);
+                  }}
+                  disabled={loading}
+                >
+                  <UploadCloud size={14} /> Publish Records to Route53
+                </button>
+              )}
             </div>
           </div>
         </div>
