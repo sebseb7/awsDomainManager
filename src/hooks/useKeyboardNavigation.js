@@ -25,6 +25,8 @@ export const useKeyboardNavigation = (navigationState, navigationActions) => {
     handleDownloadItem,
     handleManageKeys,
     handleRecreateKey,
+    handlePublishSesDkim,
+    handleViewSesDkim,
     handleDeleteRecord,
     handleUpArrow,
     handleDownArrow,
@@ -83,6 +85,18 @@ export const useKeyboardNavigation = (navigationState, navigationActions) => {
       }
       if (input === 'r' && records.length > 0) {
         handleRecreateKey?.();
+        return;
+      }
+    }
+
+    // Handle 'p' (publish DKIM CNAMEs to Route53) and 'v'/Enter (view DKIM records) on SES screen
+    if (screen === 'ses-identities' && !showAddRecord && records.length > 0) {
+      if (input === 'p') {
+        handlePublishSesDkim?.();
+        return;
+      }
+      if (input === 'v' || key.return) {
+        handleViewSesDkim?.();
         return;
       }
     }

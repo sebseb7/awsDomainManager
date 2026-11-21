@@ -32,6 +32,7 @@ import {
 import {
   loadSesIdentities,
   createSesIdentity as createSesIdentityService,
+  publishSesDkimToRoute53,
   deleteSesIdentity as deleteSesIdentityService,
 } from './services/sesService.js';
 import { useKeyboardNavigation } from './hooks/useKeyboardNavigation.js';
@@ -117,6 +118,7 @@ const CLI = () => {
   const [selectedSesIndex, setSelectedSesIndex] = useState(0);
   const [showAddSesIdentity, setShowAddSesIdentity] = useState(false);
   const [sesIdentityInput, setSesIdentityInput] = useState('');
+  const [showSesDkimModal, setShowSesDkimModal] = useState(false);
 
   // Shared state
   const [loading, setLoading] = useState(false);
@@ -212,6 +214,7 @@ const CLI = () => {
       setSelectedSesIndex(0);
       setShowAddSesIdentity(false);
       setSesIdentityInput('');
+      setShowSesDkimModal(false);
       setSelectedRecordIndex(0);
       setSelectedRuleIndex(0);
       setSelectedAccountIndex(0);
@@ -759,12 +762,12 @@ const CLI = () => {
     }
   };
 
-  // Amazon SES: Load, create, delete identities
+  // Amazon SES: Load, create, publish DKIM, delete identities
   const loadSesIdentitiesAndHandleError = async (account) => {
     setLoading(true);
     setError(null);
     try {
-      const loaded = await loadSesIdentities(account);
+      const loaded = await loadSesIdentities(account, accounts);
       setSesIdentities(loaded);
       setSelectedSesIndex((prev) =>
         loaded.length === 0 ? 0 : Math.min(prev, loaded.length - 1)
@@ -782,10 +785,35 @@ const CLI = () => {
     setLoading(true);
     setError(null);
     try {
-      const created = await createSesIdentityService(selectedAccount, sesIdentityInput);
+      const message = await createSesIdentityService(selectedAccount, sesIdentityInput, accounts);
       setShowAddSesIdentity(false);
       setSesIdentityInput('');
-      setStatusMessage(`Created SES identity "${created}".`);
+      setStatusMessage(message);
+      await loadSesIdentitiesAndHandleError(selectedAccount);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const publishSesDkim = async () => {
+    const target = sesIdentities[selectedSesIndex];
+    if (!selectedAccount || !target) return;
+    if (target.identityType !== 'DOMAIN') {
+      setError('Select a Domain identity to publish Easy DKIM CNAME records to Route53.');
+      return;
+    }
+    setLoading(true);
+    setError(null);
+    try {
+      const message = await publishSesDkimToRoute53(
+        selectedAccount,
+        accounts,
+        target.identityName,
+        target.dkimTokens
+      );
+      setStatusMessage(message);
       await loadSesIdentitiesAndHandleError(selectedAccount);
     } catch (err) {
       setError(err.message);
@@ -947,6 +975,24 @@ const CLI = () => {
         setKeyConfirmAction('recreate');
       }
     },
+    handlePublishSesDkim: () => {
+      if (screen === 'ses-identities') {
+        publishSesDkim();
+      }
+    },
+    handleViewSesDkim: () => {
+      if (screen === 'ses-identities') {
+        const target = sesIdentities[selectedSesIndex];
+        if (!target) return;
+        if (target.identityType !== 'DOMAIN') {
+          setError('Select a Domain identity to view Easy DKIM CNAME records.');
+          return;
+        }
+        setError(null);
+        setStatusMessage(null);
+        setShowSesDkimModal(true);
+      }
+    },
     handleDeleteRecord: () => {
       if (screen === 's3-objects' && objects[selectedObjectIndex]?.isFolder) {
         setError('Folders cannot be deleted directly. Open the folder and delete objects inside.');
@@ -1000,6 +1046,8 @@ const CLI = () => {
     handleEscape: () => {
       if (createdIamResult) {
         dismissCreatedIamResult();
+      } else if (showSesDkimModal) {
+        setShowSesDkimModal(false);
       } else if (addKeyRole) {
         cancelAddBucketKey();
       } else if (showAddSesIdentity) {
@@ -1088,6 +1136,7 @@ const CLI = () => {
       showAddRule ||
       showAddBucket ||
       showAddSesIdentity ||
+      showSesDkimModal ||
       Boolean(accountFormMode) ||
       Boolean(objectFormMode) ||
       Boolean(addKeyRole) ||
@@ -1177,6 +1226,9 @@ const CLI = () => {
       sesIdentityInput={sesIdentityInput}
       setSesIdentityInput={setSesIdentityInput}
       addSesIdentity={addSesIdentity}
+      showSesDkimModal={showSesDkimModal}
+      setShowSesDkimModal={setShowSesDkimModal}
+      publishSesDkim={publishSesDkim}
     />
   );
 };

@@ -137,6 +137,9 @@ test.beforeEach(async ({ page }) => {
               currentSes = currentSes.filter((i) => i.identityName !== args.identityName);
               return null;
             }
+            case 'publish_ses_dkim_records': {
+              return `Published 3 DKIM CNAME records for "${args.domain}" to Route53 zone "example.com." (prod-aws).`;
+            }
             default:
               return [];
           }

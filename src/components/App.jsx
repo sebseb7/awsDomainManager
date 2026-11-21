@@ -98,6 +98,9 @@ const App = (props) => {
     sesIdentityInput,
     setSesIdentityInput,
     addSesIdentity,
+    showSesDkimModal,
+    setShowSesDkimModal,
+    publishSesDkim,
   } = props;
 
   const renderScreen = () => {
@@ -271,6 +274,9 @@ const App = (props) => {
             sesIdentityInput={sesIdentityInput}
             setSesIdentityInput={setSesIdentityInput}
             addSesIdentity={addSesIdentity}
+            showSesDkimModal={showSesDkimModal}
+            setShowSesDkimModal={setShowSesDkimModal}
+            publishSesDkim={publishSesDkim}
             showDeleteConfirm={showDeleteConfirm}
             statusMessage={statusMessage}
           />

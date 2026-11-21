@@ -214,6 +214,15 @@ async fn create_ses_identity(profile: String, identity_name: String) -> Result<S
 }
 
 #[tauri::command]
+async fn publish_ses_dkim_records(
+    profile: String,
+    domain: String,
+    dkim_tokens: Vec<String>,
+) -> Result<String, String> {
+    ses::publish_ses_dkim_records(&profile, &domain, dkim_tokens).await
+}
+
+#[tauri::command]
 async fn delete_ses_identity(profile: String, identity_name: String) -> Result<(), String> {
     ses::delete_ses_identity(&profile, &identity_name).await
 }
@@ -250,6 +259,7 @@ pub fn run() {
             revoke_bucket_iam_user,
             list_ses_identities,
             create_ses_identity,
+            publish_ses_dkim_records,
             delete_ses_identity
         ])
         .run(tauri::generate_context!())

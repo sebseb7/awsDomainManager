@@ -101,7 +101,11 @@ export interface SesIdentity {
   typeLabel: string;
   verificationStatus: string;
   dkimStatus: string;
+  dkimTokens?: string[];
   sendingEnabled: boolean;
+  matchedZoneId?: string | null;
+  matchedZoneName?: string | null;
+  matchedZoneProfile?: string | null;
 }
 
 export type NavSection = 'route53' | 'ec2' | 's3' | 'ses' | 'accounts';

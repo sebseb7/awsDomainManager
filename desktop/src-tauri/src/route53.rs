@@ -221,3 +221,136 @@ pub async fn delete_dns_record(
 
     Ok(())
 }
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MatchedZoneInfo {
+    pub profile: String,
+    pub zone_id: String,
+    pub zone_name: String,
+}
+
+fn domain_matches_zone(domain: &str, zone_name: &str) -> bool {
+    let norm_domain = domain.trim().trim_end_matches('.').to_ascii_lowercase();
+    let norm_zone = zone_name.trim().trim_end_matches('.').to_ascii_lowercase();
+    if norm_domain.is_empty() || norm_zone.is_empty() {
+        return false;
+    }
+    norm_domain == norm_zone || norm_domain.ends_with(&format!(".{}", norm_zone))
+}
+
+pub async fn load_all_zones_across_profiles(
+    primary_profile: &str,
+) -> Vec<(String, HostedZoneDto)> {
+    let mut profiles_to_check = vec![primary_profile.to_string()];
+    if let Ok(all_profiles) = crate::profiles::get_aws_profiles() {
+        for p in all_profiles {
+            if !profiles_to_check.contains(&p.profile) {
+                profiles_to_check.push(p.profile);
+            }
+        }
+    }
+
+    let mut all_zones = Vec::new();
+    for prof in profiles_to_check {
+        if let Ok(zones) = list_hosted_zones(&prof).await {
+            for z in zones {
+                all_zones.push((prof.clone(), z));
+            }
+        }
+    }
+    all_zones
+}
+
+pub fn match_domain_in_zones(
+    domain: &str,
+    zones: &[(String, HostedZoneDto)],
+) -> Option<MatchedZoneInfo> {
+    let mut best: Option<&(String, HostedZoneDto)> = None;
+    for entry in zones {
+        let (_, z) = entry;
+        if !domain_matches_zone(domain, &z.name) {
+            continue;
+        }
+        match best {
+            None => best = Some(entry),
+            Some((_, current_best)) => {
+                // Prefer public zone over private zone, then longest zone name match
+                let best_public = !current_best.is_private;
+                let cand_public = !z.is_private;
+                if (cand_public && !best_public)
+                    || (cand_public == best_public && z.name.len() > current_best.name.len())
+                {
+                    best = Some(entry);
+                }
+            }
+        }
+    }
+    best.map(|(prof, z)| MatchedZoneInfo {
+        profile: prof.clone(),
+        zone_id: z.id.clone(),
+        zone_name: z.name.clone(),
+    })
+}
+
+pub async fn upsert_dkim_cname_records(
+    zone_profile: &str,
+    zone_id: &str,
+    domain: &str,
+    dkim_tokens: &[String],
+) -> Result<usize, String> {
+    if dkim_tokens.is_empty() {
+        return Err(format!("No DKIM tokens found for domain \"{}\".", domain));
+    }
+
+    let config = build_sdk_config(zone_profile, Some("us-east-1")).await?;
+    let client = Client::new(&config);
+    let clean_domain = domain.trim().trim_end_matches('.');
+
+    let mut changes = Vec::new();
+    for token in dkim_tokens {
+        let trimmed_token = token.trim();
+        if trimmed_token.is_empty() {
+            continue;
+        }
+        let record_fqdn = format!("{}._domainkey.{}.", trimmed_token, clean_domain);
+        let record_target = format!("{}.dkim.amazonses.com", trimmed_token);
+
+        let rr = ResourceRecord::builder()
+            .value(record_target)
+            .build()
+            .map_err(|e| format!("Invalid DKIM record value: {}", e))?;
+
+        let rrs = ResourceRecordSet::builder()
+            .name(record_fqdn)
+            .r#type(RrType::Cname)
+            .ttl(300)
+            .resource_records(rr)
+            .build()
+            .map_err(|e| format!("Invalid DKIM record set: {}", e))?;
+
+        let change = Change::builder()
+            .action(ChangeAction::Upsert)
+            .resource_record_set(rrs)
+            .build()
+            .map_err(|e| format!("Invalid DKIM change: {}", e))?;
+
+        changes.push(change);
+    }
+
+    let count = changes.len();
+    let batch = ChangeBatch::builder()
+        .set_changes(Some(changes))
+        .build()
+        .map_err(|e| format!("Invalid DKIM change batch: {}", e))?;
+
+    client
+        .change_resource_record_sets()
+        .hosted_zone_id(zone_id)
+        .change_batch(batch)
+        .send()
+        .await
+        .map_err(|e| format!("Failed publishing DKIM CNAME records to Route53: {}", e))?;
+
+    Ok(count)
+}

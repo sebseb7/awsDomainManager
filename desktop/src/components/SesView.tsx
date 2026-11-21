@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Globe, Mail, Plus, RefreshCw, Trash2 } from 'lucide-react';
+import { Check, Copy, Eye, Globe, Mail, Plus, RefreshCw, Trash2, UploadCloud, X } from 'lucide-react';
 import { api } from '../api';
 import type { AwsProfile, SesIdentity } from '../types';
 
@@ -18,6 +18,8 @@ export const SesView: React.FC<Props> = ({ account, onError, onSuccess }) => {
   const [showCreate, setShowCreate] = useState(false);
   const [newIdentityName, setNewIdentityName] = useState('');
   const [deleteTarget, setDeleteTarget] = useState<SesIdentity | null>(null);
+  const [dkimModalTarget, setDkimModalTarget] = useState<SesIdentity | null>(null);
+  const [copiedKey, setCopiedKey] = useState<string | null>(null);
 
   const loadIdentities = async () => {
     setLoading(true);
@@ -41,10 +43,27 @@ export const SesView: React.FC<Props> = ({ account, onError, onSuccess }) => {
     e.preventDefault();
     setLoading(true);
     try {
-      const created = await api.createSesIdentity(account.profile, newIdentityName);
+      const message = await api.createSesIdentity(account.profile, newIdentityName);
       setShowCreate(false);
       setNewIdentityName('');
-      onSuccess(`Created SES identity "${created}".`);
+      onSuccess(message);
+      await loadIdentities();
+    } catch (err) {
+      onError(String(err));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handlePublishDkim = async (item: SesIdentity) => {
+    setLoading(true);
+    try {
+      const msg = await api.publishSesDkimRecords(
+        account.profile,
+        item.identityName,
+        item.dkimTokens || []
+      );
+      onSuccess(msg);
       await loadIdentities();
     } catch (err) {
       onError(String(err));
@@ -66,6 +85,12 @@ export const SesView: React.FC<Props> = ({ account, onError, onSuccess }) => {
     } finally {
       setLoading(false);
     }
+  };
+
+  const copyText = async (key: string, val: string) => {
+    await navigator.clipboard.writeText(val);
+    setCopiedKey(key);
+    setTimeout(() => setCopiedKey(null), 1500);
   };
 
   const renderStatusBadge = (status: string) => {
@@ -148,23 +173,33 @@ export const SesView: React.FC<Props> = ({ account, onError, onSuccess }) => {
                   <th>Verification</th>
                   <th>DKIM</th>
                   <th>Sending</th>
-                  <th style={{ width: 90 }}>Actions</th>
+                  <th style={{ width: 250 }}>Actions</th>
                 </tr>
               </thead>
               <tbody>
                 {filtered.map((item) => {
                   const isDomain = item.identityType === 'DOMAIN';
+                  const hasTokens = (item.dkimTokens?.length || 0) > 0;
+                  const needsDkimPublish = isDomain && item.dkimStatus !== 'SUCCESS';
                   return (
                     <tr key={item.identityName}>
                       <td style={{ fontWeight: 600 }}>
-                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
                           {isDomain ? (
                             <Globe size={14} color="var(--accent)" />
                           ) : (
                             <Mail size={14} color="var(--blue)" />
                           )}
                           <span className="mono">{item.identityName}</span>
-                        </span>
+                          {item.matchedZoneName && (
+                            <span
+                              className="badge badge-blue"
+                              title={`Managed in Route53 zone ${item.matchedZoneName} (${item.matchedZoneProfile || account.profile})`}
+                            >
+                              Route53
+                            </span>
+                          )}
+                        </div>
                       </td>
                       <td>
                         <span className={`badge ${isDomain ? 'badge-type' : 'badge-blue'}`}>
@@ -181,13 +216,38 @@ export const SesView: React.FC<Props> = ({ account, onError, onSuccess }) => {
                         )}
                       </td>
                       <td>
-                        <button
-                          className="btn btn-danger btn-sm"
-                          title="Delete Identity"
-                          onClick={() => setDeleteTarget(item)}
-                        >
-                          <Trash2 size={13} />
-                        </button>
+                        <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
+                          {isDomain && hasTokens && (
+                            <button
+                              className="btn btn-sm"
+                              title="View Easy DKIM CNAME Records"
+                              onClick={() => setDkimModalTarget(item)}
+                            >
+                              <Eye size={13} /> DNS
+                            </button>
+                          )}
+                          {isDomain && (hasTokens || item.matchedZoneId) && (
+                            <button
+                              className={`btn btn-sm ${needsDkimPublish && item.matchedZoneId ? 'btn-primary' : ''}`}
+                              title={
+                                item.matchedZoneName
+                                  ? `Publish 3 Easy DKIM CNAME records to Route53 zone ${item.matchedZoneName}`
+                                  : 'Publish Easy DKIM CNAME records to Route53'
+                              }
+                              onClick={() => handlePublishDkim(item)}
+                              disabled={loading}
+                            >
+                              <UploadCloud size={13} /> Publish R53
+                            </button>
+                          )}
+                          <button
+                            className="btn btn-danger btn-sm"
+                            title="Delete Identity"
+                            onClick={() => setDeleteTarget(item)}
+                          >
+                            <Trash2 size={13} />
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   );
@@ -214,6 +274,11 @@ export const SesView: React.FC<Props> = ({ account, onError, onSuccess }) => {
                   required
                 />
               </div>
+              <p style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>
+                If you add a domain that matches a Route53 hosted zone in your configured AWS
+                accounts, its 3 Easy DKIM <code className="mono">CNAME</code> records will be
+                published to Route53 automatically.
+              </p>
             </div>
             <div className="modal-footer">
               <button type="button" className="btn" onClick={() => setShowCreate(false)}>
@@ -224,6 +289,101 @@ export const SesView: React.FC<Props> = ({ account, onError, onSuccess }) => {
               </button>
             </div>
           </form>
+        </div>
+      )}
+
+      {dkimModalTarget && (
+        <div className="modal-backdrop">
+          <div className="modal modal-xl">
+            <div className="modal-header">
+              <h3>
+                Easy DKIM DNS Records — <span className="mono">{dkimModalTarget.identityName}</span>
+              </h3>
+              <button className="btn btn-sm" onClick={() => setDkimModalTarget(null)}>
+                <X size={14} />
+              </button>
+            </div>
+            <div className="modal-body">
+              <p style={{ fontSize: 13, color: 'var(--text-muted)' }}>
+                Publish these 3 <code className="mono">CNAME</code> records to verify Easy DKIM for{' '}
+                <strong style={{ color: 'var(--text)' }}>{dkimModalTarget.identityName}</strong>
+                {dkimModalTarget.matchedZoneName
+                  ? ` (detected in Route53 zone ${dkimModalTarget.matchedZoneName} on profile "${dkimModalTarget.matchedZoneProfile}"):`
+                  : ':'}
+              </p>
+              <div className="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th style={{ width: 70 }}>Type</th>
+                      <th>Name</th>
+                      <th>Value</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(dkimModalTarget.dkimTokens || []).map((token) => {
+                      const cleanDom = dkimModalTarget.identityName.replace(/\.$/, '');
+                      const recName = `${token}._domainkey.${cleanDom}`;
+                      const recVal = `${token}.dkim.amazonses.com`;
+                      return (
+                        <tr key={token}>
+                          <td>
+                            <span className="badge badge-type">CNAME</span>
+                          </td>
+                          <td className="mono" style={{ fontSize: 12 }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                              <span style={{ wordBreak: 'break-all' }}>{recName}</span>
+                              <button
+                                className="btn btn-sm"
+                                onClick={() => copyText(`name-${token}`, recName)}
+                              >
+                                {copiedKey === `name-${token}` ? (
+                                  <Check size={12} />
+                                ) : (
+                                  <Copy size={12} />
+                                )}
+                              </button>
+                            </div>
+                          </td>
+                          <td className="mono" style={{ fontSize: 12 }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                              <span style={{ wordBreak: 'break-all' }}>{recVal}</span>
+                              <button
+                                className="btn btn-sm"
+                                onClick={() => copyText(`val-${token}`, recVal)}
+                              >
+                                {copiedKey === `val-${token}` ? (
+                                  <Check size={12} />
+                                ) : (
+                                  <Copy size={12} />
+                                )}
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+            <div className="modal-footer">
+              <button className="btn" onClick={() => setDkimModalTarget(null)}>
+                Close
+              </button>
+              <button
+                className="btn btn-primary"
+                onClick={async () => {
+                  const target = dkimModalTarget;
+                  setDkimModalTarget(null);
+                  await handlePublishDkim(target);
+                }}
+                disabled={loading}
+              >
+                <UploadCloud size={14} /> Publish CNAME Records to Route53
+              </button>
+            </div>
+          </div>
         </div>
       )}
 

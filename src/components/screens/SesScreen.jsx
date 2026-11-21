@@ -26,7 +26,63 @@ const AddSesIdentityForm = ({ identityInput, setIdentityInput, onSubmit, onCance
         />
       </Box>
       <Box marginTop={1}>
+        <Text dimColor>
+          If the domain matches a Route53 zone in your accounts, its 3 Easy DKIM CNAME records are published automatically.
+        </Text>
+      </Box>
+      <Box marginTop={1}>
         <Text dimColor>Press Enter to create identity, or Esc to cancel</Text>
+      </Box>
+    </Box>
+  );
+};
+
+const DkimRecordsModal = ({ identity, onPublish, onClose }) => {
+  useInput((input, key) => {
+    if (key.escape || key.return) {
+      onClose?.();
+      return;
+    }
+    if (input === 'p') {
+      onPublish?.();
+    }
+  });
+
+  const cleanDomain = (identity.identityName || '').replace(/\.$/, '');
+  const tokens = identity.dkimTokens || [];
+
+  return (
+    <Box flexDirection="column" borderStyle="round" borderColor="cyan" padding={1}>
+      <Text bold color="cyan">
+        Easy DKIM CNAME Records for &quot;{identity.identityName}&quot;
+        {identity.matchedZoneName
+          ? ` (Route53 zone: ${identity.matchedZoneName} on ${identity.matchedZoneProfile})`
+          : ''}
+      </Text>
+      {tokens.length === 0 ? (
+        <Box marginTop={1}>
+          <Text dimColor>No Easy DKIM tokens available for this identity.</Text>
+        </Box>
+      ) : (
+        <Box flexDirection="column" marginTop={1}>
+          <Box>
+            <Text bold>{'Type'.padEnd(7)}</Text>
+            <Text bold>{'Name'.padEnd(56)}</Text>
+            <Text bold>Value</Text>
+          </Box>
+          {tokens.map((token) => (
+            <Box key={token}>
+              <Text color="yellow">{'CNAME'.padEnd(7)}</Text>
+              <Text color="cyan">{`${token}._domainkey.${cleanDomain}`.padEnd(56)}</Text>
+              <Text>{`${token}.dkim.amazonses.com`}</Text>
+            </Box>
+          ))}
+        </Box>
+      )}
+      <Box marginTop={1}>
+        <Text dimColor>
+          Press &apos;p&apos; to publish these CNAME records to Route53, or Enter/Esc to close
+        </Text>
       </Box>
     </Box>
   );
@@ -42,13 +98,16 @@ const SesScreen = ({
   sesIdentityInput,
   setSesIdentityInput,
   addSesIdentity,
+  showSesDkimModal,
+  setShowSesDkimModal,
+  publishSesDkim,
   showDeleteConfirm,
   statusMessage,
 }) => {
   const domainCount = sesIdentities.filter((i) => i.identityType === 'DOMAIN').length;
   const emailCount = sesIdentities.filter((i) => i.identityType === 'EMAIL_ADDRESS').length;
   const highlighted = sesIdentities[selectedSesIndex];
-  const isModalOpen = showAddSesIdentity || showDeleteConfirm;
+  const isModalOpen = showAddSesIdentity || showDeleteConfirm || showSesDkimModal;
 
   return (
     <Box flexDirection="column" marginBottom={1}>
@@ -74,7 +133,16 @@ const SesScreen = ({
         </Box>
       )}
 
-      {showAddSesIdentity ? (
+      {showSesDkimModal && highlighted ? (
+        <DkimRecordsModal
+          identity={highlighted}
+          onPublish={() => {
+            setShowSesDkimModal(false);
+            publishSesDkim?.();
+          }}
+          onClose={() => setShowSesDkimModal(false)}
+        />
+      ) : showAddSesIdentity ? (
         <AddSesIdentityForm
           identityInput={sesIdentityInput}
           setIdentityInput={setSesIdentityInput}
@@ -124,10 +192,13 @@ const SesScreen = ({
             const typeTag = isDomain ? '[DOMAIN]' : '[EMAIL]';
             const typeColor = isSelected ? 'cyan' : isDomain ? 'yellow' : 'blue';
             const rowColor = isSelected ? 'cyan' : undefined;
+            const nameWithR53 = item.matchedZoneName
+              ? `${item.identityName} [R53]`
+              : item.identityName;
             const nameDisplay =
-              item.identityName.length > 34
-                ? `${item.identityName.slice(0, 31)}...`
-                : item.identityName;
+              nameWithR53.length > 34
+                ? `${nameWithR53.slice(0, 31)}...`
+                : nameWithR53;
             const verColor = isSelected
               ? 'cyan'
               : item.verificationStatus === 'SUCCESS'
@@ -170,7 +241,7 @@ const SesScreen = ({
         <Box marginTop={1}>
           <Text dimColor>
             {sesIdentities.length > 0
-              ? 'Use ↑/↓ arrows, a to add domain/email identity, d to delete, or Esc to go back'
+              ? 'Use ↑/↓ arrows, p to publish DKIM CNAMEs to Route53, v/Enter to view DKIM records, a to add, d to delete, or Esc to go back'
               : 'Press a to add a domain or email identity, or Esc to go back'}
           </Text>
         </Box>

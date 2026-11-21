@@ -222,7 +222,15 @@ export const DUMMY_SES_IDENTITIES = [
     typeLabel: 'Domain',
     verificationStatus: 'SUCCESS',
     dkimStatus: 'SUCCESS',
+    dkimTokens: [
+      'p7dqj6kznmefrlouwyhb5k5mp72jtpry',
+      't53x6nyyaxlcsaa2oitqa6wjfxgqqfwj',
+      'lzpuyt2exa3oni5g4iqpvqtulxmjgqps',
+    ],
     sendingEnabled: true,
+    matchedZoneId: 'Z0123456789ABCDEF',
+    matchedZoneName: 'example.com.',
+    matchedZoneProfile: 'prod-aws',
   },
   {
     identityName: 'mail.example.com',
@@ -230,7 +238,15 @@ export const DUMMY_SES_IDENTITIES = [
     typeLabel: 'Domain',
     verificationStatus: 'SUCCESS',
     dkimStatus: 'SUCCESS',
+    dkimTokens: [
+      'a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6',
+      'q7r8s9t0u1v2w3x4y5z6a7b8c9d0e1f2',
+      'g3h4i5j6k7l8m9n0o1p2q3r4s5t6u7v8',
+    ],
     sendingEnabled: true,
+    matchedZoneId: 'Z0123456789ABCDEF',
+    matchedZoneName: 'example.com.',
+    matchedZoneProfile: 'prod-aws',
   },
   {
     identityName: 'staging.example.com',
@@ -238,7 +254,15 @@ export const DUMMY_SES_IDENTITIES = [
     typeLabel: 'Domain',
     verificationStatus: 'PENDING',
     dkimStatus: 'PENDING',
+    dkimTokens: [
+      'k9l8m7n6o5p4q3r2s1t0u9v8w7x6y5z4',
+      'f3e2d1c0b9a8z7y6x5w4v3u2t1s0r9q8',
+      'j5i4h3g2f1e0d9c8b7a6z5y4x3w2v1u0',
+    ],
     sendingEnabled: false,
+    matchedZoneId: 'Z0123456789ABCDEF',
+    matchedZoneName: 'example.com.',
+    matchedZoneProfile: 'prod-aws',
   },
   {
     identityName: 'alerts@example.com',

@@ -177,3 +177,107 @@ export const deleteRecord = async (account, zone, record) => {
     throw new Error(`Failed to delete record: ${err.message}`);
   }
 };
+
+/**
+ * Check if a domain name falls under a Route53 hosted zone name
+ * @param {string} domain
+ * @param {string} zoneName
+ * @returns {boolean}
+ */
+export const domainMatchesZone = (domain, zoneName) => {
+  const normDomain = (domain || '').trim().replace(/\.$/, '').toLowerCase();
+  const normZone = (zoneName || '').trim().replace(/\.$/, '').toLowerCase();
+  if (!normDomain || !normZone) return false;
+  return normDomain === normZone || normDomain.endsWith(`.${normZone}`);
+};
+
+/**
+ * Load all Route53 hosted zones across the active account and any other configured AWS profiles
+ * @param {Object} primaryAccount
+ * @param {Array<Object>} [allAccounts=[]]
+ * @returns {Promise<Array<{ account: Object, zone: Object }>>}
+ */
+export const loadAllZonesAcrossAccounts = async (primaryAccount, allAccounts = []) => {
+  const accountsToCheck = [
+    primaryAccount,
+    ...allAccounts.filter((a) => a.profile !== primaryAccount?.profile),
+  ].filter(Boolean);
+
+  const results = [];
+  for (const acc of accountsToCheck) {
+    try {
+      const zones = await loadHostedZones(acc);
+      for (const z of zones) {
+        results.push({ account: acc, zone: z });
+      }
+    } catch {
+      // Ignore accounts without Route53 permissions
+    }
+  }
+  return results;
+};
+
+/**
+ * Find the best matching Route53 hosted zone for a domain
+ * @param {string} domain
+ * @param {Array<{ account: Object, zone: Object }>} allZones
+ * @returns {{ account: Object, zone: Object } | null}
+ */
+export const matchDomainInZones = (domain, allZones) => {
+  let best = null;
+  for (const entry of allZones) {
+    const z = entry.zone;
+    const zName = z.Name || z.name || '';
+    if (!domainMatchesZone(domain, zName)) continue;
+    const isPrivate = Boolean(z.Config?.PrivateZone ?? z.isPrivate);
+    if (!best) {
+      best = entry;
+    } else {
+      const bestPrivate = Boolean(best.zone.Config?.PrivateZone ?? best.zone.isPrivate);
+      const bestName = best.zone.Name || best.zone.name || '';
+      if ((!isPrivate && bestPrivate) || (isPrivate === bestPrivate && zName.length > bestName.length)) {
+        best = entry;
+      }
+    }
+  }
+  return best;
+};
+
+/**
+ * Upsert Easy DKIM CNAME records for a domain into a Route53 hosted zone
+ * @param {Object} zoneAccount
+ * @param {string} zoneId
+ * @param {string} domain
+ * @param {Array<string>} dkimTokens
+ * @returns {Promise<number>} Number of CNAME records upserted
+ */
+export const upsertDkimCnameRecords = async (zoneAccount, zoneId, domain, dkimTokens) => {
+  const validTokens = (dkimTokens || []).map((t) => t.trim()).filter(Boolean);
+  if (validTokens.length === 0) {
+    throw new Error(`No DKIM tokens available for "${domain}".`);
+  }
+
+  const cleanDomain = domain.trim().replace(/\.$/, '');
+  const changes = validTokens.map((token) => ({
+    Action: 'UPSERT',
+    ResourceRecordSet: {
+      Name: `${token}._domainkey.${cleanDomain}.`,
+      Type: 'CNAME',
+      TTL: 300,
+      ResourceRecords: [{ Value: `${token}.dkim.amazonses.com` }],
+    },
+  }));
+
+  try {
+    const client = createRoute53Client(zoneAccount);
+    await client.send(
+      new ChangeResourceRecordSetsCommand({
+        HostedZoneId: zoneId,
+        ChangeBatch: { Changes: changes },
+      })
+    );
+    return changes.length;
+  } catch (err) {
+    throw new Error(`Failed publishing DKIM CNAME records to Route53: ${err.message}`);
+  }
+};

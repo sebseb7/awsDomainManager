@@ -114,6 +114,8 @@ export const api = {
     invoke<SesIdentity[]>('list_ses_identities', { profile }),
   createSesIdentity: (profile: string, identityName: string) =>
     invoke<string>('create_ses_identity', { profile, identityName }),
+  publishSesDkimRecords: (profile: string, domain: string, dkimTokens: string[] = []) =>
+    invoke<string>('publish_ses_dkim_records', { profile, domain, dkimTokens }),
   deleteSesIdentity: (profile: string, identityName: string) =>
     invoke<void>('delete_ses_identity', { profile, identityName }),
 
