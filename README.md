@@ -12,7 +12,7 @@ npm i . && npm run build && npm run start
 
 - **Route53 DNS Records** — Manage A/AAAA/CNAME/MX/TXT/NS records across hosted zones
 - **EC2 Security Groups** — View, add, and delete inbound rules for security groups
-- **S3 Buckets** — List, create (with optional scoped Put-Only and/or Read-Only IAM user creation — never delete), and delete S3 buckets, plus browse prefixes/folders and upload, download, or delete objects
+- **S3 Buckets** — List, create (with optional scoped Put-Only and/or Read-Only IAM user creation — never delete — plus a scannable QR code of bucket & credentials), and delete S3 buckets, plus browse prefixes/folders and upload, download, or delete objects
 - **AWS Account Management** — Add, edit, and remove AWS credential profiles (`~/.aws/credentials` and `~/.aws/config`) directly from the tool
 - Terminal UI with keyboard navigation
 - Support for AWS credential profiles

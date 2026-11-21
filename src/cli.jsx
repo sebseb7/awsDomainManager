@@ -466,11 +466,27 @@ const CLI = () => {
           bucketName: createdName,
           region: targetRegion,
           users: createdUsers,
+          isScopedIamUsers: true,
         });
         setStatusMessage(
           `Bucket "${createdName}" and ${createdUsers.length} IAM user${createdUsers.length > 1 ? 's' : ''} created.`
         );
       } else {
+        if (selectedAccount.accessKeyId && selectedAccount.secretAccessKey) {
+          setCreatedIamResult({
+            bucketName: createdName,
+            region: targetRegion,
+            users: [
+              {
+                bucketName: createdName,
+                userName: selectedAccount.profile,
+                accessKeyId: selectedAccount.accessKeyId,
+                secretAccessKey: selectedAccount.secretAccessKey,
+              },
+            ],
+            isScopedIamUsers: false,
+          });
+        }
         setStatusMessage(`Bucket "${createdName}" created.`);
       }
 

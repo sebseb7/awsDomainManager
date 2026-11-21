@@ -41,6 +41,7 @@ const BucketScreen = ({
           bucketName={createdIamResult.bucketName}
           region={createdIamResult.region}
           users={createdIamResult.users}
+          isScopedIamUsers={createdIamResult.isScopedIamUsers}
           onDismiss={dismissCreatedIamResult}
         />
       ) : showAddBucket ? (
