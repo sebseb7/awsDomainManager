@@ -8,6 +8,7 @@ on:
 
 permissions:
   contents: write
+  actions: read
 
 env:
   CARGO_TERM_COLOR: always
@@ -22,6 +23,17 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
+
+      - name: Wait for in-progress CI Build on same commit to warm [main] caches
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          RUN_ID=$(gh run list --workflow "ci.yml" --commit "${{ github.sha }}" --json databaseId,status --jq '.[] | select(.status == "in_progress" or .status == "queued" or .status == "waiting") | .databaseId' | head -n 1 || true)
+          if [ -n "$RUN_ID" ]; then
+            echo "Waiting for CI Build run #$RUN_ID on commit ${{ github.sha }} to finish warming [main] caches..."
+            gh run watch "$RUN_ID" || true
+          fi
 
       - name: Compute OS-independent desktop source tree hash
         id: desktop-tree
@@ -112,28 +124,42 @@ jobs:
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Restore Cargo.lock from [main] cache (ensures rust-cache restore key matches save key)
-        id: cache-cargo-lock
+      - name: Compute Cargo dependencies hash (ignoring package version bumps)
+        id: cargo-deps
+        shell: bash
+        run: |
+          DEPS_HASH=$(grep -v '^version *=' desktop/src-tauri/Cargo.toml | sha256sum | cut -d' ' -f1)
+          echo "hash=$DEPS_HASH" >> "$GITHUB_OUTPUT"
+
+      - name: Restore Cargo.lock from [main] cache
         uses: actions/cache/restore@v6
         with:
           path: desktop/src-tauri/Cargo.lock
-          key: cargo-lock-${{ hashFiles('desktop/src-tauri/Cargo.toml') }}
+          key: cargo-lock-${{ steps.cargo-deps.outputs.hash }}
+          restore-keys: |
+            cargo-lock-
 
-      - name: Generate Cargo.lock before rust-cache if not cached
-        if: steps.cache-cargo-lock.outputs.cache-hit != 'true'
-        run: cargo generate-lockfile --manifest-path desktop/src-tauri/Cargo.toml
+      - name: Incrementally sync Cargo.lock without upgrading locked crates
+        shell: bash
+        run: |
+          cargo metadata --format-version 1 --manifest-path desktop/src-tauri/Cargo.toml > /dev/null
+          HASH=$(sha256sum desktop/src-tauri/Cargo.lock | cut -d' ' -f1)
+          echo "lock_hash=$HASH" >> "$GITHUB_ENV"
 
-      - name: Setup sccache
-        uses: mozilla-actions/sccache-action@v0.0.11
-
-      - name: Restore sccache artifacts from [main] cache
+      - name: Restore sccache directory from [main] cache (before starting sccache daemon)
         uses: actions/cache/restore@v6
         with:
           path: ${{ runner.temp }}/sccache-cache
-          key: ${{ runner.os }}-sccache-${{ hashFiles('desktop/src-tauri/Cargo.toml', 'desktop/src-tauri/src/**') }}
+          key: ${{ runner.os }}-sccache-${{ env.lock_hash }}-${{ hashFiles('desktop/src-tauri/src/**') }}
           restore-keys: |
-            ${{ runner.os }}-sccache-${{ hashFiles('desktop/src-tauri/Cargo.toml') }}-
+            ${{ runner.os }}-sccache-${{ env.lock_hash }}-
             ${{ runner.os }}-sccache-
+
+      - name: Setup sccache daemon with restored directory
+        uses: mozilla-actions/sccache-action@v0.0.11
+        env:
+          SCCACHE_DIR: ${{ runner.temp }}/sccache-cache
+          SCCACHE_CACHE_SIZE: '5G'
 
       - name: Restore Rust target artifacts from [main] cache
         uses: Swatinem/rust-cache@v2
@@ -149,6 +175,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RUSTC_WRAPPER: sccache
           SCCACHE_DIR: ${{ runner.temp }}/sccache-cache
+          MACOSX_DEPLOYMENT_TARGET: '10.13'
         with:
           projectPath: desktop
           tagName: ${{ github.ref_name }}
@@ -156,7 +183,7 @@ jobs:
           releaseBody: |
             ## AWS Domain Manager Desktop (Tauri v2)
 
-            Native desktop application for managing AWS Route53 DNS records, EC2 Security Group inbound rules, S3 buckets & objects (with scoped IAM user creation, key revoke/recreate, multiple read keys & single write key, and QR code export), Amazon SES identities (domains & email addresses with Route53 DKIM/DMARC/inbound MX publishing, email verification resend, per-email SMTP sender keys with QR code export, and integrated SMTP send tester), and AWS credential profiles.
+            Native desktop application for managing AWS Route53 DNS records, EC2 Security Group inbound rules, S3 buckets & objects (with scoped IAM user creation, key revoke/recreate, multiple read keys & single write key, and QR code export), Amazon SES identities (domains & email addresses), and AWS credential profiles.
 
             ### Downloads
             - **macOS (Apple Silicon):** `.dmg` disk image
@@ -165,7 +192,11 @@ jobs:
           prerelease: false
           args: --config src-tauri/tauri.ci.conf.json --bundles ${{ matrix.bundles }}
 
-      - name: Show sccache statistics
+      - name: Show sccache statistics and stop daemon
         if: always()
         shell: bash
-        run: sccache --show-stats
+        env:
+          SCCACHE_DIR: ${{ runner.temp }}/sccache-cache
+        run: |
+          sccache --show-stats || true
+          sccache --stop-server || true

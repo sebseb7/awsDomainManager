@@ -119,28 +119,43 @@ jobs:
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Cache Cargo.lock (locks dependency versions & ensures rust-cache restore/save keys match)
-        id: cache-cargo-lock
+      - name: Compute Cargo dependencies hash (ignoring package version bumps)
+        id: cargo-deps
+        shell: bash
+        run: |
+          DEPS_HASH=$(grep -v '^version *=' desktop/src-tauri/Cargo.toml | sha256sum | cut -d' ' -f1)
+          echo "hash=$DEPS_HASH" >> "$GITHUB_OUTPUT"
+
+      - name: Cache Cargo.lock (restore previous lockfile so existing crates never auto-upgrade)
         uses: actions/cache@v6
         with:
           path: desktop/src-tauri/Cargo.lock
-          key: cargo-lock-${{ hashFiles('desktop/src-tauri/Cargo.toml') }}
+          key: cargo-lock-${{ steps.cargo-deps.outputs.hash }}
+          restore-keys: |
+            cargo-lock-
 
-      - name: Generate Cargo.lock before rust-cache if not cached
-        if: steps.cache-cargo-lock.outputs.cache-hit != 'true'
-        run: cargo generate-lockfile --manifest-path desktop/src-tauri/Cargo.toml
+      - name: Incrementally sync Cargo.lock without upgrading locked crates
+        shell: bash
+        run: |
+          cargo metadata --format-version 1 --manifest-path desktop/src-tauri/Cargo.toml > /dev/null
+          # Keep Cargo.lock package version synced without touching dependency versions
+          HASH=$(sha256sum desktop/src-tauri/Cargo.lock | cut -d' ' -f1)
+          echo "lock_hash=$HASH" >> "$GITHUB_ENV"
 
-      - name: Setup sccache
-        uses: mozilla-actions/sccache-action@v0.0.11
-
-      - name: Cache sccache artifacts (single archive, no API rate limit)
+      - name: Cache sccache directory (before starting sccache daemon)
         uses: actions/cache@v6
         with:
           path: ${{ runner.temp }}/sccache-cache
-          key: ${{ runner.os }}-sccache-${{ hashFiles('desktop/src-tauri/Cargo.toml', 'desktop/src-tauri/src/**') }}
+          key: ${{ runner.os }}-sccache-${{ env.lock_hash }}-${{ hashFiles('desktop/src-tauri/src/**') }}
           restore-keys: |
-            ${{ runner.os }}-sccache-${{ hashFiles('desktop/src-tauri/Cargo.toml') }}-
+            ${{ runner.os }}-sccache-${{ env.lock_hash }}-
             ${{ runner.os }}-sccache-
+
+      - name: Setup sccache daemon with cached directory
+        uses: mozilla-actions/sccache-action@v0.0.11
+        env:
+          SCCACHE_DIR: ${{ runner.temp }}/sccache-cache
+          SCCACHE_CACHE_SIZE: '5G'
 
       - name: Cache Rust target artifacts
         uses: Swatinem/rust-cache@v2
@@ -158,7 +173,11 @@ jobs:
           MACOSX_DEPLOYMENT_TARGET: '10.13'
         run: cargo build --release --features tauri/custom-protocol --manifest-path desktop/src-tauri/Cargo.toml
 
-      - name: Show sccache statistics
+      - name: Show sccache statistics and flush daemon
         if: always()
         shell: bash
-        run: sccache --show-stats
+        env:
+          SCCACHE_DIR: ${{ runner.temp }}/sccache-cache
+        run: |
+          sccache --show-stats || true
+          sccache --stop-server || true
