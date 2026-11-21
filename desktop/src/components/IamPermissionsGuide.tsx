@@ -77,10 +77,16 @@ export const IamPermissionsGuide: React.FC<Props> = ({ defaultExpanded = false }
 
     if (includeIamBucketUsers && !readOnly) {
       statements.push({
+        Sid: 'IAMListBucketUsers',
+        Effect: 'Allow',
+        Action: ['iam:ListUsers'],
+        Resource: '*',
+      });
+      statements.push({
         Sid: 'IAMManageBucketUsersOnly',
         Effect: 'Allow',
         Action: [
-          'iam:ListUsers',
+          'iam:GetUser',
           'iam:ListUserTags',
           'iam:CreateUser',
           'iam:DeleteUser',

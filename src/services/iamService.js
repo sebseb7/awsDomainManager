@@ -252,44 +252,88 @@ const listAllManagedUsers = async (client) => {
  *   accessKeys: Array<{ accessKeyId: string, status: string, createDate: string }>
  * }>>}
  */
+const getCandidateUserNamesForBucket = (bucketName) => {
+  const names = [
+    validateIamUserName(`${bucketName.slice(0, 60)}-put`),
+    validateIamUserName(`${bucketName.slice(0, 59)}-read`),
+  ];
+  for (let i = 2; i <= 6; i++) {
+    const suffix = `-read-${i}`;
+    names.push(validateIamUserName(`${bucketName.slice(0, 64 - suffix.length)}${suffix}`));
+  }
+  return names;
+};
+
+const inspectCandidateUser = async (client, bucketName, userName, createdAtHint = null) => {
+  let tagsResp;
+  try {
+    tagsResp = await client.send(new ListUserTagsCommand({ UserName: userName }));
+  } catch (err) {
+    if (err.name === 'NoSuchEntityException' || String(err.message).includes('cannot be found')) {
+      return null;
+    }
+    throw err;
+  }
+
+  const tags = tagsResp.Tags || [];
+  const tagMap = Object.fromEntries(tags.map((t) => [t.Key, t.Value]));
+  let role = null;
+  if (tagMap.S3Bucket === bucketName && (tagMap.S3Access === 'put-only' || tagMap.S3Access === 'read-only')) {
+    role = tagMap.S3Access;
+  } else if (!tagMap.S3Bucket && userName.endsWith('-put')) {
+    role = 'put-only';
+  } else if (!tagMap.S3Bucket && userName.includes('-read')) {
+    role = 'read-only';
+  }
+  if (!role) return null;
+
+  const keysResp = await client.send(new ListAccessKeysCommand({ UserName: userName }));
+  const accessKeys = (keysResp.AccessKeyMetadata || []).map((k) => ({
+    accessKeyId: k.AccessKeyId || '',
+    status: k.Status || 'Unknown',
+    createDate: k.CreateDate
+      ? new Date(k.CreateDate).toISOString().slice(0, 16).replace('T', ' ')
+      : '-',
+  }));
+
+  return {
+    bucketName,
+    userName,
+    role,
+    roleLabel: ROLE_LABELS[role] || role,
+    createdAt:
+      createdAtHint ||
+      accessKeys[0]?.createDate ||
+      '-',
+    accessKeys,
+  };
+};
+
 export const listBucketIamUsers = async (account, bucketName) => {
   const client = createIAMClient(account);
   try {
-    const allUsers = await listAllManagedUsers(client);
     const matching = [];
+    let allUsers = null;
+    try {
+      allUsers = await listAllManagedUsers(client);
+    } catch {
+      allUsers = null;
+    }
 
-    for (const user of allUsers) {
-      if (!user.UserName) continue;
-      const tagsResp = await client.send(
-        new ListUserTagsCommand({ UserName: user.UserName })
-      );
-      const tags = tagsResp.Tags || [];
-      const tagMap = Object.fromEntries(tags.map((t) => [t.Key, t.Value]));
-      if (tagMap.S3Bucket !== bucketName) continue;
-      const role = tagMap.S3Access;
-      if (role !== 'put-only' && role !== 'read-only') continue;
-
-      const keysResp = await client.send(
-        new ListAccessKeysCommand({ UserName: user.UserName })
-      );
-      const accessKeys = (keysResp.AccessKeyMetadata || []).map((k) => ({
-        accessKeyId: k.AccessKeyId || '',
-        status: k.Status || 'Unknown',
-        createDate: k.CreateDate
-          ? new Date(k.CreateDate).toISOString().slice(0, 16).replace('T', ' ')
-          : '-',
-      }));
-
-      matching.push({
-        bucketName,
-        userName: user.UserName,
-        role,
-        roleLabel: ROLE_LABELS[role] || role,
-        createdAt: user.CreateDate
+    if (allUsers) {
+      for (const user of allUsers) {
+        if (!user.UserName) continue;
+        const createdHint = user.CreateDate
           ? new Date(user.CreateDate).toISOString().slice(0, 16).replace('T', ' ')
-          : '-',
-        accessKeys,
-      });
+          : null;
+        const info = await inspectCandidateUser(client, bucketName, user.UserName, createdHint);
+        if (info) matching.push(info);
+      }
+    } else {
+      for (const candidate of getCandidateUserNamesForBucket(bucketName)) {
+        const info = await inspectCandidateUser(client, bucketName, candidate, null);
+        if (info) matching.push(info);
+      }
     }
 
     // Sort write (put-only) first, then read-only alphabetically
@@ -355,8 +399,13 @@ export const createBucketIamUser = async (account, bucketName, role, customUserN
     }
   }
 
-  const allManaged = await listAllManagedUsers(client);
-  const existingNames = new Set(allManaged.map((u) => u.UserName).filter(Boolean));
+  let existingNames;
+  try {
+    const allManaged = await listAllManagedUsers(client);
+    existingNames = new Set(allManaged.map((u) => u.UserName).filter(Boolean));
+  } catch {
+    existingNames = new Set(existingForBucket.map((u) => u.userName));
+  }
   const trimmedCustom = (customUserName || '').trim();
   const userName = trimmedCustom
     ? validateIamUserName(trimmedCustom)

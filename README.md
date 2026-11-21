@@ -168,10 +168,18 @@ Create a dedicated IAM user for this tool instead of using root or `Administrato
       ]
     },
     {
+      "Sid": "IAMListBucketUsers",
+      "Effect": "Allow",
+      "Action": [
+        "iam:ListUsers"
+      ],
+      "Resource": "*"
+    },
+    {
       "Sid": "IAMManageBucketUsersOnly",
       "Effect": "Allow",
       "Action": [
-        "iam:ListUsers",
+        "iam:GetUser",
         "iam:ListUserTags",
         "iam:CreateUser",
         "iam:DeleteUser",
