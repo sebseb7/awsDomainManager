@@ -130,8 +130,9 @@ jobs:
         uses: actions/cache@v6
         with:
           path: ${{ runner.temp }}/sccache-cache
-          key: ${{ runner.os }}-sccache-${{ github.sha }}
+          key: ${{ runner.os }}-sccache-${{ hashFiles('desktop/src-tauri/Cargo.toml', 'desktop/src-tauri/Cargo.lock') }}-${{ hashFiles('desktop/src-tauri/src/**') }}
           restore-keys: |
+            ${{ runner.os }}-sccache-${{ hashFiles('desktop/src-tauri/Cargo.toml', 'desktop/src-tauri/Cargo.lock') }}-
             ${{ runner.os }}-sccache-
 
       - name: Cache Rust target artifacts
@@ -141,7 +142,6 @@ jobs:
           shared-key: tauri-release-${{ matrix.platform }}
           cache-all-crates: true
           cache-on-failure: true
-          save-if: true
 
       - name: Build Rust backend (no distribution packaging)
         env:
