@@ -84,7 +84,7 @@ const BucketScreen = ({
       {!isModalOpen && buckets.length > 0 && !loading && (
         <Box marginTop={1}>
           <Text dimColor>
-            Use ↑/↓ arrows, Enter to browse objects, a to create bucket, d to delete, or Esc to go back
+            Use ↑/↓ arrows, Enter to browse objects, k to manage IAM keys, a to create bucket, d to delete, or Esc to go back
           </Text>
         </Box>
       )}

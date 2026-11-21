@@ -61,10 +61,11 @@ export const IamPermissionsGuide: React.FC<Props> = ({ defaultExpanded = false }
         Sid: 'S3ManageBucketsAndObjects',
         Effect: 'Allow',
         Action: readOnly
-          ? ['s3:ListBucket', 's3:GetObject']
+          ? ['s3:ListBucket', 's3:GetBucketLocation', 's3:GetObject']
           : [
               's3:CreateBucket',
               's3:DeleteBucket',
+              's3:GetBucketLocation',
               's3:ListBucket',
               's3:GetObject',
               's3:PutObject',
@@ -76,13 +77,20 @@ export const IamPermissionsGuide: React.FC<Props> = ({ defaultExpanded = false }
 
     if (includeIamBucketUsers && !readOnly) {
       statements.push({
-        Sid: 'IAMCreateBucketUsersOnly',
+        Sid: 'IAMManageBucketUsersOnly',
         Effect: 'Allow',
         Action: [
+          'iam:ListUsers',
+          'iam:ListUserTags',
           'iam:CreateUser',
-          'iam:PutUserPolicy',
+          'iam:DeleteUser',
           'iam:TagUser',
+          'iam:PutUserPolicy',
+          'iam:ListUserPolicies',
+          'iam:DeleteUserPolicy',
           'iam:CreateAccessKey',
+          'iam:ListAccessKeys',
+          'iam:DeleteAccessKey',
         ],
         Resource: 'arn:aws:iam::*:user/s3-bucket-users/*',
       });

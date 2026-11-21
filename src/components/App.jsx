@@ -9,6 +9,7 @@ import RulesScreen from './screens/RulesScreen.jsx';
 import ManageAccountsScreen from './screens/ManageAccountsScreen.jsx';
 import BucketScreen from './screens/BucketScreen.jsx';
 import BucketObjectsScreen from './screens/BucketObjectsScreen.jsx';
+import BucketKeysScreen from './screens/BucketKeysScreen.jsx';
 
 const getTitle = (selectedResource) => {
   if (!selectedResource) return 'AWS Domain Manager';
@@ -79,6 +80,15 @@ const App = (props) => {
     setObjectFormData,
     submitObjectForm,
     cancelObjectForm,
+    bucketRegion,
+    bucketKeys,
+    selectedKeyIndex,
+    addKeyRole,
+    addKeyUserName,
+    setAddKeyUserName,
+    submitAddBucketKey,
+    cancelAddBucketKey,
+    keyConfirmAction,
   } = props;
 
   const renderScreen = () => {
@@ -215,6 +225,27 @@ const App = (props) => {
             submitObjectForm={submitObjectForm}
             cancelObjectForm={cancelObjectForm}
             showDeleteConfirm={showDeleteConfirm}
+            statusMessage={statusMessage}
+          />
+        );
+
+      case 's3-keys':
+        return (
+          <BucketKeysScreen
+            selectedAccount={selectedAccount}
+            selectedBucket={selectedBucket}
+            bucketRegion={bucketRegion}
+            bucketKeys={bucketKeys}
+            loading={loading}
+            selectedKeyIndex={selectedKeyIndex}
+            addKeyRole={addKeyRole}
+            addKeyUserName={addKeyUserName}
+            setAddKeyUserName={setAddKeyUserName}
+            submitAddBucketKey={submitAddBucketKey}
+            cancelAddBucketKey={cancelAddBucketKey}
+            keyConfirmAction={keyConfirmAction}
+            createdIamResult={createdIamResult}
+            dismissCreatedIamResult={dismissCreatedIamResult}
             statusMessage={statusMessage}
           />
         );

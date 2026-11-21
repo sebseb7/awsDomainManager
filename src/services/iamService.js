@@ -1,8 +1,15 @@
 import {
   IAMClient,
   CreateUserCommand,
+  DeleteUserCommand,
+  ListUsersCommand,
+  ListUserTagsCommand,
   PutUserPolicyCommand,
+  ListUserPoliciesCommand,
+  DeleteUserPolicyCommand,
   CreateAccessKeyCommand,
+  ListAccessKeysCommand,
+  DeleteAccessKeyCommand,
 } from '@aws-sdk/client-iam';
 import { fromIni } from '@aws-sdk/credential-provider-ini';
 
@@ -209,4 +216,282 @@ export const createBucketIamUsers = async (account, bucketName, accessMode, cust
   }
 
   return created;
+};
+
+/**
+ * List all managed IAM users under /s3-bucket-users/
+ * @param {IAMClient} client
+ * @returns {Promise<Array>}
+ */
+const listAllManagedUsers = async (client) => {
+  const users = [];
+  let marker;
+  do {
+    const resp = await client.send(
+      new ListUsersCommand({
+        PathPrefix: BUCKET_USER_PATH,
+        Marker: marker,
+      })
+    );
+    users.push(...(resp.Users || []));
+    marker = resp.IsTruncated ? resp.Marker : undefined;
+  } while (marker);
+  return users;
+};
+
+/**
+ * List all managed IAM users/keys associated with an S3 bucket
+ * @param {Object} account
+ * @param {string} bucketName
+ * @returns {Promise<Array<{
+ *   bucketName: string,
+ *   userName: string,
+ *   role: 'put-only'|'read-only',
+ *   roleLabel: string,
+ *   createdAt: string,
+ *   accessKeys: Array<{ accessKeyId: string, status: string, createDate: string }>
+ * }>>}
+ */
+export const listBucketIamUsers = async (account, bucketName) => {
+  const client = createIAMClient(account);
+  try {
+    const allUsers = await listAllManagedUsers(client);
+    const matching = [];
+
+    for (const user of allUsers) {
+      if (!user.UserName) continue;
+      const tagsResp = await client.send(
+        new ListUserTagsCommand({ UserName: user.UserName })
+      );
+      const tags = tagsResp.Tags || [];
+      const tagMap = Object.fromEntries(tags.map((t) => [t.Key, t.Value]));
+      if (tagMap.S3Bucket !== bucketName) continue;
+      const role = tagMap.S3Access;
+      if (role !== 'put-only' && role !== 'read-only') continue;
+
+      const keysResp = await client.send(
+        new ListAccessKeysCommand({ UserName: user.UserName })
+      );
+      const accessKeys = (keysResp.AccessKeyMetadata || []).map((k) => ({
+        accessKeyId: k.AccessKeyId || '',
+        status: k.Status || 'Unknown',
+        createDate: k.CreateDate
+          ? new Date(k.CreateDate).toISOString().slice(0, 16).replace('T', ' ')
+          : '-',
+      }));
+
+      matching.push({
+        bucketName,
+        userName: user.UserName,
+        role,
+        roleLabel: ROLE_LABELS[role] || role,
+        createdAt: user.CreateDate
+          ? new Date(user.CreateDate).toISOString().slice(0, 16).replace('T', ' ')
+          : '-',
+        accessKeys,
+      });
+    }
+
+    // Sort write (put-only) first, then read-only alphabetically
+    return matching.sort((a, b) => {
+      if (a.role !== b.role) return a.role === 'put-only' ? -1 : 1;
+      return a.userName.localeCompare(b.userName);
+    });
+  } catch (err) {
+    throw new Error(`Failed to list IAM keys for bucket "${bucketName}": ${err.message}`);
+  }
+};
+
+/**
+ * Pick an unused default IAM username for a bucket and role
+ * @param {string} bucketName
+ * @param {'put-only'|'read-only'} role
+ * @param {Set<string>} existingNames
+ * @returns {string}
+ */
+const pickDefaultUserName = (bucketName, role, existingNames) => {
+  const baseSuffix = role === 'put-only' ? '-put' : '-read';
+  const candidate1 = validateIamUserName(
+    `${bucketName.slice(0, 64 - baseSuffix.length)}${baseSuffix}`
+  );
+  if (!existingNames.has(candidate1)) {
+    return candidate1;
+  }
+  for (let i = 2; i <= 999; i++) {
+    const suffix = `${baseSuffix}-${i}`;
+    const candidate = validateIamUserName(
+      `${bucketName.slice(0, 64 - suffix.length)}${suffix}`
+    );
+    if (!existingNames.has(candidate)) {
+      return candidate;
+    }
+  }
+  throw new Error('Could not generate a unique IAM username. Please specify a custom username.');
+};
+
+/**
+ * Create a single scoped IAM user & access key for an existing bucket.
+ * Enforces max 1 write (put-only) key per bucket; allows multiple read (read-only) keys.
+ * @param {Object} account
+ * @param {string} bucketName
+ * @param {'put-only'|'read-only'} role
+ * @param {string} [customUserName]
+ * @returns {Promise<Object>} Created user credentials
+ */
+export const createBucketIamUser = async (account, bucketName, role, customUserName = '') => {
+  if (role !== 'put-only' && role !== 'read-only') {
+    throw new Error(`Invalid IAM role: "${role}". Must be "put-only" or "read-only".`);
+  }
+
+  const client = createIAMClient(account);
+  const existingForBucket = await listBucketIamUsers(account, bucketName);
+
+  if (role === 'put-only') {
+    const existingWrite = existingForBucket.find((u) => u.role === 'put-only');
+    if (existingWrite) {
+      throw new Error(
+        `Only one write (put-only) key/user is allowed per bucket. Revoke or recreate "${existingWrite.userName}" instead.`
+      );
+    }
+  }
+
+  const allManaged = await listAllManagedUsers(client);
+  const existingNames = new Set(allManaged.map((u) => u.UserName).filter(Boolean));
+  const trimmedCustom = (customUserName || '').trim();
+  const userName = trimmedCustom
+    ? validateIamUserName(trimmedCustom)
+    : pickDefaultUserName(bucketName, role, existingNames);
+
+  try {
+    await client.send(
+      new CreateUserCommand({
+        UserName: userName,
+        Path: BUCKET_USER_PATH,
+        Tags: [
+          { Key: 'ManagedBy', Value: 'aws-domain-manager' },
+          { Key: 'S3Bucket', Value: bucketName },
+          { Key: 'S3Access', Value: role },
+        ],
+      })
+    );
+
+    const policyDoc = buildBucketPolicy(bucketName, role);
+    const policyName = `s3-${role}-${bucketName}`.slice(0, 128);
+    await client.send(
+      new PutUserPolicyCommand({
+        UserName: userName,
+        PolicyName: policyName,
+        PolicyDocument: JSON.stringify(policyDoc),
+      })
+    );
+
+    const keyResponse = await client.send(
+      new CreateAccessKeyCommand({
+        UserName: userName,
+      })
+    );
+
+    return {
+      bucketName,
+      userName,
+      role,
+      roleLabel: ROLE_LABELS[role],
+      accessKeyId: keyResponse.AccessKey?.AccessKeyId || '',
+      secretAccessKey: keyResponse.AccessKey?.SecretAccessKey || '',
+    };
+  } catch (err) {
+    throw new Error(`Failed creating IAM user "${userName}": ${err.message}`);
+  }
+};
+
+/**
+ * Recreate (rotate) access keys for an existing bucket IAM user.
+ * Deletes all existing access keys on that user, re-applies the scoped inline policy,
+ * and issues a fresh access key pair.
+ * @param {Object} account
+ * @param {string} bucketName
+ * @param {string} userName
+ * @param {'put-only'|'read-only'} role
+ * @returns {Promise<Object>} New credentials
+ */
+export const recreateBucketIamUser = async (account, bucketName, userName, role) => {
+  if (role !== 'put-only' && role !== 'read-only') {
+    throw new Error(`Invalid IAM role: "${role}".`);
+  }
+  const client = createIAMClient(account);
+  try {
+    const keysResp = await client.send(new ListAccessKeysCommand({ UserName: userName }));
+    for (const k of keysResp.AccessKeyMetadata || []) {
+      if (k.AccessKeyId) {
+        await client.send(
+          new DeleteAccessKeyCommand({
+            UserName: userName,
+            AccessKeyId: k.AccessKeyId,
+          })
+        );
+      }
+    }
+
+    const policyDoc = buildBucketPolicy(bucketName, role);
+    const policyName = `s3-${role}-${bucketName}`.slice(0, 128);
+    await client.send(
+      new PutUserPolicyCommand({
+        UserName: userName,
+        PolicyName: policyName,
+        PolicyDocument: JSON.stringify(policyDoc),
+      })
+    );
+
+    const keyResponse = await client.send(
+      new CreateAccessKeyCommand({ UserName: userName })
+    );
+
+    return {
+      bucketName,
+      userName,
+      role,
+      roleLabel: ROLE_LABELS[role],
+      accessKeyId: keyResponse.AccessKey?.AccessKeyId || '',
+      secretAccessKey: keyResponse.AccessKey?.SecretAccessKey || '',
+    };
+  } catch (err) {
+    throw new Error(`Failed recreating IAM key for "${userName}": ${err.message}`);
+  }
+};
+
+/**
+ * Revoke and delete a managed bucket IAM user along with all its access keys and inline policies.
+ * @param {Object} account
+ * @param {string} userName
+ * @returns {Promise<void>}
+ */
+export const revokeBucketIamUser = async (account, userName) => {
+  const client = createIAMClient(account);
+  try {
+    const keysResp = await client.send(new ListAccessKeysCommand({ UserName: userName }));
+    for (const k of keysResp.AccessKeyMetadata || []) {
+      if (k.AccessKeyId) {
+        await client.send(
+          new DeleteAccessKeyCommand({
+            UserName: userName,
+            AccessKeyId: k.AccessKeyId,
+          })
+        );
+      }
+    }
+
+    const policiesResp = await client.send(new ListUserPoliciesCommand({ UserName: userName }));
+    for (const policyName of policiesResp.PolicyNames || []) {
+      await client.send(
+        new DeleteUserPolicyCommand({
+          UserName: userName,
+          PolicyName: policyName,
+        })
+      );
+    }
+
+    await client.send(new DeleteUserCommand({ UserName: userName }));
+  } catch (err) {
+    throw new Error(`Failed revoking IAM user "${userName}": ${err.message}`);
+  }
 };

@@ -8,6 +8,7 @@ interface Props {
   region: string;
   users: CreatedIamUser[];
   isScopedIamUsers: boolean;
+  title?: string;
   onClose: () => void;
 }
 
@@ -16,6 +17,7 @@ export const QrCredentialsModal: React.FC<Props> = ({
   region,
   users,
   isScopedIamUsers,
+  title,
   onClose,
 }) => {
   const [activeIndex, setActiveIndex] = useState(0);
@@ -59,7 +61,7 @@ export const QrCredentialsModal: React.FC<Props> = ({
       <div className="modal modal-wide">
         <div className="modal-header">
           <h3>
-            Bucket "{bucketName}" ({region}) Created
+            {title || `Bucket "${bucketName}" (${region}) Created`}
           </h3>
           <button className="btn btn-sm" onClick={onClose}>
             <X size={14} />

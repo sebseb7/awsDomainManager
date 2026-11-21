@@ -7,6 +7,7 @@ const CreatedIamUsersModal = ({
   region,
   users,
   isScopedIamUsers = true,
+  title,
   onDismiss,
 }) => {
   const [activeIndex, setActiveIndex] = useState(0);
@@ -50,10 +51,11 @@ const CreatedIamUsersModal = ({
   return (
     <Box flexDirection="column" borderStyle="round" borderColor="green" padding={1}>
       <Text bold color="green">
-        ✓ Bucket &quot;{bucketName}&quot; ({region}) created
-        {isScopedIamUsers
-          ? ` with IAM user${users.length > 1 ? 's' : ''}`
-          : ''}
+        ✓{' '}
+        {title ||
+          `Bucket "${bucketName}" (${region}) created${
+            isScopedIamUsers ? ` with IAM user${users.length > 1 ? 's' : ''}` : ''
+          }`}
       </Text>
 
       {isScopedIamUsers ? (

@@ -4,6 +4,7 @@ import type {
   AccountInput,
   AddRuleInput,
   AwsProfile,
+  BucketIamUser,
   CreatedIamUser,
   DnsRecord,
   HostedZone,
@@ -64,6 +65,8 @@ export const api = {
   ) => invoke<string>('download_object', { profile, bucketName, key, destinationPath }),
   deleteObject: (profile: string, bucketName: string, key: string) =>
     invoke<void>('delete_object', { profile, bucketName, key }),
+  getBucketRegion: (profile: string, bucketName: string) =>
+    invoke<string>('get_bucket_region', { profile, bucketName }),
   createBucketIamUsers: (
     profile: string,
     bucketName: string,
@@ -76,6 +79,34 @@ export const api = {
       accessMode,
       customUserName,
     }),
+  listBucketIamUsers: (profile: string, bucketName: string) =>
+    invoke<BucketIamUser[]>('list_bucket_iam_users', { profile, bucketName }),
+  createBucketIamUser: (
+    profile: string,
+    bucketName: string,
+    role: 'put-only' | 'read-only',
+    customUserName: string
+  ) =>
+    invoke<CreatedIamUser>('create_bucket_iam_user', {
+      profile,
+      bucketName,
+      role,
+      customUserName,
+    }),
+  recreateBucketIamUser: (
+    profile: string,
+    bucketName: string,
+    userName: string,
+    role: 'put-only' | 'read-only'
+  ) =>
+    invoke<CreatedIamUser>('recreate_bucket_iam_user', {
+      profile,
+      bucketName,
+      userName,
+      role,
+    }),
+  revokeBucketIamUser: (profile: string, userName: string) =>
+    invoke<void>('revoke_bucket_iam_user', { profile, userName }),
 
   // Native file dialogs
   pickUploadFile: async (): Promise<string | null> => {

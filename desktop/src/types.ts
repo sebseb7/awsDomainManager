@@ -78,4 +78,19 @@ export interface CreatedIamUser {
   secretAccessKey: string;
 }
 
+export interface IamAccessKeyMeta {
+  accessKeyId: string;
+  status: string;
+  createDate: string;
+}
+
+export interface BucketIamUser {
+  bucketName: string;
+  userName: string;
+  role: 'put-only' | 'read-only';
+  roleLabel: string;
+  createdAt: string;
+  accessKeys: IamAccessKeyMeta[];
+}
+
 export type NavSection = 'route53' | 'ec2' | 's3' | 'accounts';

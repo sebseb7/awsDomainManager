@@ -22,7 +22,7 @@ npm i . && npm run build && npm run start
 
 - **Route53 DNS Records** — Manage A/AAAA/CNAME/MX/TXT/NS records across hosted zones
 - **EC2 Security Groups** — View, add, and delete inbound rules for security groups
-- **S3 Buckets** — List, create (with optional scoped Put-Only and/or Read-Only IAM user creation — never delete — plus a scannable QR code of bucket & credentials), and delete S3 buckets, plus browse prefixes/folders and upload, download, or delete objects
+- **S3 Buckets** — List, create (with optional scoped Put-Only and/or Read-Only IAM user creation — never delete — plus a scannable QR code of bucket & credentials), and delete S3 buckets; manage per-bucket IAM keys (revoke/recreate read & write keys, multiple read keys allowed, max 1 write key per bucket); and browse prefixes/folders to upload, download, or delete objects
 - **AWS Account Management** — Add, edit, and remove AWS credential profiles (`~/.aws/credentials` and `~/.aws/config`) directly from the tool
 - Terminal UI with keyboard navigation
 - Support for AWS credential profiles
@@ -125,6 +125,7 @@ Create a dedicated IAM user for this tool instead of using root or `Administrato
       "Action": [
         "s3:CreateBucket",
         "s3:DeleteBucket",
+        "s3:GetBucketLocation",
         "s3:ListBucket",
         "s3:GetObject",
         "s3:PutObject",
@@ -136,13 +137,20 @@ Create a dedicated IAM user for this tool instead of using root or `Administrato
       ]
     },
     {
-      "Sid": "IAMCreateBucketUsersOnly",
+      "Sid": "IAMManageBucketUsersOnly",
       "Effect": "Allow",
       "Action": [
+        "iam:ListUsers",
+        "iam:ListUserTags",
         "iam:CreateUser",
-        "iam:PutUserPolicy",
+        "iam:DeleteUser",
         "iam:TagUser",
-        "iam:CreateAccessKey"
+        "iam:PutUserPolicy",
+        "iam:ListUserPolicies",
+        "iam:DeleteUserPolicy",
+        "iam:CreateAccessKey",
+        "iam:ListAccessKeys",
+        "iam:DeleteAccessKey"
       ],
       "Resource": "arn:aws:iam::*:user/s3-bucket-users/*"
     }

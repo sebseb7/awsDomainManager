@@ -1,6 +1,6 @@
 import { useInput } from 'ink';
 
-const LIST_SCREENS = ['records', 'rules', 'manage-accounts', 's3-buckets', 's3-objects'];
+const LIST_SCREENS = ['records', 'rules', 'manage-accounts', 's3-buckets', 's3-objects', 's3-keys'];
 
 /**
  * Custom hook for handling global keyboard navigation
@@ -23,6 +23,8 @@ export const useKeyboardNavigation = (navigationState, navigationActions) => {
     handleEditItem,
     handleSelectItem,
     handleDownloadItem,
+    handleManageKeys,
+    handleRecreateKey,
     handleDeleteRecord,
     handleUpArrow,
     handleDownArrow,
@@ -57,6 +59,32 @@ export const useKeyboardNavigation = (navigationState, navigationActions) => {
     ) {
       handleAddRecord();
       return;
+    }
+
+    // Handle 'k' to manage IAM keys for selected S3 bucket
+    if (
+      input === 'k' &&
+      ((screen === 's3-buckets' && records.length > 0) || screen === 's3-objects') &&
+      !showAddRecord
+    ) {
+      handleManageKeys?.();
+      return;
+    }
+
+    // Handle 'w' (create write key) and 'n'/'a' (add read key) on S3 keys screen
+    if (screen === 's3-keys' && !showAddRecord) {
+      if (input === 'w') {
+        handleAddRecord('put-only');
+        return;
+      }
+      if (input === 'n' || input === 'a') {
+        handleAddRecord('read-only');
+        return;
+      }
+      if (input === 'r' && records.length > 0) {
+        handleRecreateKey?.();
+        return;
+      }
     }
 
     // Handle 'u' to upload an object (S3 objects screen)

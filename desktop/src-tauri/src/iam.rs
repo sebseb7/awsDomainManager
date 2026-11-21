@@ -3,6 +3,7 @@ use aws_sdk_iam::types::Tag;
 use aws_sdk_iam::Client;
 use serde::Serialize;
 use serde_json::json;
+use std::collections::HashSet;
 
 const BUCKET_USER_PATH: &str = "/s3-bucket-users/";
 
@@ -15,6 +16,25 @@ pub struct CreatedIamUserDto {
     pub role_label: String,
     pub access_key_id: String,
     pub secret_access_key: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IamAccessKeyMetaDto {
+    pub access_key_id: String,
+    pub status: String,
+    pub create_date: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BucketIamUserDto {
+    pub bucket_name: String,
+    pub user_name: String,
+    pub role: String,
+    pub role_label: String,
+    pub created_at: String,
+    pub access_keys: Vec<IamAccessKeyMetaDto>,
 }
 
 fn role_label(role: &str) -> &'static str {
@@ -239,4 +259,394 @@ pub async fn create_bucket_iam_users(
     }
 
     Ok(created)
+}
+
+async fn list_all_managed_users(
+    client: &Client,
+) -> Result<Vec<aws_sdk_iam::types::User>, String> {
+    let mut users = Vec::new();
+    let mut marker: Option<String> = None;
+
+    loop {
+        let mut req = client.list_users().path_prefix(BUCKET_USER_PATH);
+        if let Some(m) = &marker {
+            req = req.marker(m);
+        }
+        let resp = req
+            .send()
+            .await
+            .map_err(|e| format!("Failed listing IAM users: {}", e))?;
+        users.extend(resp.users().iter().cloned());
+        if resp.is_truncated() {
+            marker = resp.marker().map(|s| s.to_string());
+            if marker.is_none() {
+                break;
+            }
+        } else {
+            break;
+        }
+    }
+
+    Ok(users)
+}
+
+pub async fn list_bucket_iam_users(
+    profile: &str,
+    bucket_name: &str,
+) -> Result<Vec<BucketIamUserDto>, String> {
+    let config = build_sdk_config(profile, Some("us-east-1")).await?;
+    let client = Client::new(&config);
+
+    let all_users = list_all_managed_users(&client).await?;
+    let mut matching = Vec::new();
+
+    for user in all_users {
+        let user_name = user.user_name().to_string();
+        let tags_resp = client
+            .list_user_tags()
+            .user_name(&user_name)
+            .send()
+            .await
+            .map_err(|e| format!("Failed reading tags for IAM user \"{}\": {}", user_name, e))?;
+
+        let mut tag_bucket: Option<&str> = None;
+        let mut tag_access: Option<&str> = None;
+        for t in tags_resp.tags() {
+            if t.key() == "S3Bucket" {
+                tag_bucket = Some(t.value());
+            } else if t.key() == "S3Access" {
+                tag_access = Some(t.value());
+            }
+        }
+
+        if tag_bucket != Some(bucket_name) {
+            continue;
+        }
+        let role = match tag_access {
+            Some("put-only") => "put-only",
+            Some("read-only") => "read-only",
+            _ => continue,
+        };
+
+        let keys_resp = client
+            .list_access_keys()
+            .user_name(&user_name)
+            .send()
+            .await
+            .map_err(|e| {
+                format!(
+                    "Failed listing access keys for IAM user \"{}\": {}",
+                    user_name, e
+                )
+            })?;
+
+        let access_keys = keys_resp
+            .access_key_metadata()
+            .iter()
+            .map(|k| IamAccessKeyMetaDto {
+                access_key_id: k.access_key_id().unwrap_or_default().to_string(),
+                status: k
+                    .status()
+                    .map(|s| s.as_str().to_string())
+                    .unwrap_or_else(|| "Unknown".to_string()),
+                create_date: k
+                    .create_date()
+                    .map(|d| d.to_string())
+                    .unwrap_or_else(|| "-".to_string()),
+            })
+            .collect();
+
+        matching.push(BucketIamUserDto {
+            bucket_name: bucket_name.to_string(),
+            user_name,
+            role: role.to_string(),
+            role_label: role_label(role).to_string(),
+            created_at: user.create_date().to_string(),
+            access_keys,
+        });
+    }
+
+    matching.sort_by(|a, b| {
+        let rank_a = if a.role == "put-only" { 0 } else { 1 };
+        let rank_b = if b.role == "put-only" { 0 } else { 1 };
+        rank_a.cmp(&rank_b).then_with(|| a.user_name.cmp(&b.user_name))
+    });
+
+    Ok(matching)
+}
+
+fn pick_default_username(
+    bucket_name: &str,
+    role: &str,
+    existing_names: &HashSet<String>,
+) -> Result<String, String> {
+    let base_suffix = if role == "put-only" { "-put" } else { "-read" };
+    let first = validate_iam_username(&format!(
+        "{}{}",
+        truncate_prefix(bucket_name, 64 - base_suffix.len()),
+        base_suffix
+    ))?;
+    if !existing_names.contains(&first) {
+        return Ok(first);
+    }
+    for i in 2..=999 {
+        let suffix = format!("{}-{}", base_suffix, i);
+        let candidate = validate_iam_username(&format!(
+            "{}{}",
+            truncate_prefix(bucket_name, 64 - suffix.len()),
+            suffix
+        ))?;
+        if !existing_names.contains(&candidate) {
+            return Ok(candidate);
+        }
+    }
+    Err("Could not generate a unique IAM username. Please specify a custom username.".to_string())
+}
+
+pub async fn create_bucket_iam_user(
+    profile: &str,
+    bucket_name: &str,
+    role: &str,
+    custom_user_name: &str,
+) -> Result<CreatedIamUserDto, String> {
+    if role != "put-only" && role != "read-only" {
+        return Err(format!(
+            "Invalid IAM role: \"{}\". Must be \"put-only\" or \"read-only\".",
+            role
+        ));
+    }
+
+    let existing_for_bucket = list_bucket_iam_users(profile, bucket_name).await?;
+    if role == "put-only" {
+        if let Some(existing_write) = existing_for_bucket.iter().find(|u| u.role == "put-only") {
+            return Err(format!(
+                "Only one write (put-only) key/user is allowed per bucket. Revoke or recreate \"{}\" instead.",
+                existing_write.user_name
+            ));
+        }
+    }
+
+    let config = build_sdk_config(profile, Some("us-east-1")).await?;
+    let client = Client::new(&config);
+
+    let all_managed = list_all_managed_users(&client).await?;
+    let existing_names: HashSet<String> = all_managed
+        .iter()
+        .map(|u| u.user_name().to_string())
+        .collect();
+
+    let trimmed_custom = custom_user_name.trim();
+    let user_name = if !trimmed_custom.is_empty() {
+        validate_iam_username(trimmed_custom)?
+    } else {
+        pick_default_username(bucket_name, role, &existing_names)?
+    };
+
+    let tag_managed = Tag::builder()
+        .key("ManagedBy")
+        .value("aws-domain-manager")
+        .build()
+        .map_err(|e| format!("Failed building tag: {}", e))?;
+    let tag_bucket = Tag::builder()
+        .key("S3Bucket")
+        .value(bucket_name)
+        .build()
+        .map_err(|e| format!("Failed building tag: {}", e))?;
+    let tag_access = Tag::builder()
+        .key("S3Access")
+        .value(role)
+        .build()
+        .map_err(|e| format!("Failed building tag: {}", e))?;
+
+    client
+        .create_user()
+        .user_name(&user_name)
+        .path(BUCKET_USER_PATH)
+        .tags(tag_managed)
+        .tags(tag_bucket)
+        .tags(tag_access)
+        .send()
+        .await
+        .map_err(|e| format!("Failed creating IAM user \"{}\": {}", user_name, e))?;
+
+    let policy_doc = build_bucket_policy(bucket_name, role)?;
+    let policy_name_full = format!("s3-{}-{}", role, bucket_name);
+    let policy_name = truncate_prefix(&policy_name_full, 128);
+
+    client
+        .put_user_policy()
+        .user_name(&user_name)
+        .policy_name(policy_name)
+        .policy_document(policy_doc)
+        .send()
+        .await
+        .map_err(|e| {
+            format!(
+                "Failed attaching policy to IAM user \"{}\": {}",
+                user_name, e
+            )
+        })?;
+
+    let key_resp = client
+        .create_access_key()
+        .user_name(&user_name)
+        .send()
+        .await
+        .map_err(|e| {
+            format!(
+                "Failed creating access key for IAM user \"{}\": {}",
+                user_name, e
+            )
+        })?;
+
+    let access_key = key_resp.access_key();
+    Ok(CreatedIamUserDto {
+        bucket_name: bucket_name.to_string(),
+        user_name,
+        role: role.to_string(),
+        role_label: role_label(role).to_string(),
+        access_key_id: access_key
+            .map(|k| k.access_key_id().to_string())
+            .unwrap_or_default(),
+        secret_access_key: access_key
+            .map(|k| k.secret_access_key().to_string())
+            .unwrap_or_default(),
+    })
+}
+
+pub async fn recreate_bucket_iam_user(
+    profile: &str,
+    bucket_name: &str,
+    user_name: &str,
+    role: &str,
+) -> Result<CreatedIamUserDto, String> {
+    if role != "put-only" && role != "read-only" {
+        return Err(format!("Invalid IAM role: \"{}\".", role));
+    }
+
+    let config = build_sdk_config(profile, Some("us-east-1")).await?;
+    let client = Client::new(&config);
+
+    let keys_resp = client
+        .list_access_keys()
+        .user_name(user_name)
+        .send()
+        .await
+        .map_err(|e| format!("Failed listing access keys for \"{}\": {}", user_name, e))?;
+
+    for k in keys_resp.access_key_metadata() {
+        if let Some(key_id) = k.access_key_id() {
+            client
+                .delete_access_key()
+                .user_name(user_name)
+                .access_key_id(key_id)
+                .send()
+                .await
+                .map_err(|e| {
+                    format!(
+                        "Failed deleting old access key \"{}\" for \"{}\": {}",
+                        key_id, user_name, e
+                    )
+                })?;
+        }
+    }
+
+    let policy_doc = build_bucket_policy(bucket_name, role)?;
+    let policy_name_full = format!("s3-{}-{}", role, bucket_name);
+    let policy_name = truncate_prefix(&policy_name_full, 128);
+
+    client
+        .put_user_policy()
+        .user_name(user_name)
+        .policy_name(policy_name)
+        .policy_document(policy_doc)
+        .send()
+        .await
+        .map_err(|e| format!("Failed updating policy for \"{}\": {}", user_name, e))?;
+
+    let key_resp = client
+        .create_access_key()
+        .user_name(user_name)
+        .send()
+        .await
+        .map_err(|e| {
+            format!(
+                "Failed creating new access key for \"{}\": {}",
+                user_name, e
+            )
+        })?;
+
+    let access_key = key_resp.access_key();
+    Ok(CreatedIamUserDto {
+        bucket_name: bucket_name.to_string(),
+        user_name: user_name.to_string(),
+        role: role.to_string(),
+        role_label: role_label(role).to_string(),
+        access_key_id: access_key
+            .map(|k| k.access_key_id().to_string())
+            .unwrap_or_default(),
+        secret_access_key: access_key
+            .map(|k| k.secret_access_key().to_string())
+            .unwrap_or_default(),
+    })
+}
+
+pub async fn revoke_bucket_iam_user(profile: &str, user_name: &str) -> Result<(), String> {
+    let config = build_sdk_config(profile, Some("us-east-1")).await?;
+    let client = Client::new(&config);
+
+    let keys_resp = client
+        .list_access_keys()
+        .user_name(user_name)
+        .send()
+        .await
+        .map_err(|e| format!("Failed listing access keys for \"{}\": {}", user_name, e))?;
+
+    for k in keys_resp.access_key_metadata() {
+        if let Some(key_id) = k.access_key_id() {
+            client
+                .delete_access_key()
+                .user_name(user_name)
+                .access_key_id(key_id)
+                .send()
+                .await
+                .map_err(|e| {
+                    format!(
+                        "Failed deleting access key \"{}\" for \"{}\": {}",
+                        key_id, user_name, e
+                    )
+                })?;
+        }
+    }
+
+    let policies_resp = client
+        .list_user_policies()
+        .user_name(user_name)
+        .send()
+        .await
+        .map_err(|e| format!("Failed listing inline policies for \"{}\": {}", user_name, e))?;
+
+    for policy_name in policies_resp.policy_names() {
+        client
+            .delete_user_policy()
+            .user_name(user_name)
+            .policy_name(policy_name)
+            .send()
+            .await
+            .map_err(|e| {
+                format!(
+                    "Failed deleting inline policy \"{}\" for \"{}\": {}",
+                    policy_name, user_name, e
+                )
+            })?;
+    }
+
+    client
+        .delete_user()
+        .user_name(user_name)
+        .send()
+        .await
+        .map_err(|e| format!("Failed deleting IAM user \"{}\": {}", user_name, e))?;
+
+    Ok(())
 }

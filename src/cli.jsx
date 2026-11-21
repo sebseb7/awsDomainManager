@@ -19,10 +19,15 @@ import {
   deleteObject as deleteObjectService,
   getParentPrefix,
   validateBucketName,
+  getBucketRegion,
 } from './services/s3Service.js';
 import {
   createBucketIamUsers,
   resolveBucketIamUsers,
+  listBucketIamUsers,
+  createBucketIamUser,
+  recreateBucketIamUser,
+  revokeBucketIamUser,
 } from './services/iamService.js';
 import { useKeyboardNavigation } from './hooks/useKeyboardNavigation.js';
 
@@ -94,6 +99,13 @@ const CLI = () => {
     key: '',
     destinationPath: '',
   });
+  const [bucketRegion, setBucketRegion] = useState('us-east-1');
+  const [bucketKeys, setBucketKeys] = useState([]);
+  const [selectedKeyIndex, setSelectedKeyIndex] = useState(0);
+  const [addKeyRole, setAddKeyRole] = useState(null); // null | 'put-only' | 'read-only'
+  const [addKeyUserName, setAddKeyUserName] = useState('');
+  const [keyConfirmAction, setKeyConfirmAction] = useState(null); // null | 'revoke' | 'recreate'
+  const [keysReturnScreen, setKeysReturnScreen] = useState('s3-buckets');
 
   // Shared state
   const [loading, setLoading] = useState(false);
@@ -146,6 +158,13 @@ const CLI = () => {
     }
   }, [selectedAccount, selectedBucket, bucketPrefix, screen]);
 
+  // Load IAM keys when entering S3 keys screen
+  useEffect(() => {
+    if (selectedAccount && selectedBucket && screen === 's3-keys') {
+      loadBucketKeysAndHandleError(selectedAccount, selectedBucket.name);
+    }
+  }, [selectedAccount, selectedBucket, screen]);
+
   // Reset state when switching resources
   useEffect(() => {
     if (selectedResource) {
@@ -166,6 +185,11 @@ const CLI = () => {
       setObjects([]);
       setSelectedObjectIndex(0);
       setObjectFormMode(null);
+      setBucketKeys([]);
+      setSelectedKeyIndex(0);
+      setAddKeyRole(null);
+      setAddKeyUserName('');
+      setKeyConfirmAction(null);
       setSelectedRecordIndex(0);
       setSelectedRuleIndex(0);
       setSelectedAccountIndex(0);
@@ -599,11 +623,126 @@ const CLI = () => {
     }
   };
 
+  // S3 IAM Keys: Load, create, recreate, revoke
+  const loadBucketKeysAndHandleError = async (account, bucketName) => {
+    setLoading(true);
+    setError(null);
+    try {
+      const [keys, region] = await Promise.all([
+        listBucketIamUsers(account, bucketName),
+        getBucketRegion(account, bucketName),
+      ]);
+      setBucketKeys(keys);
+      setBucketRegion(region || account.region || 'us-east-1');
+      setSelectedKeyIndex((prev) =>
+        keys.length === 0 ? 0 : Math.min(prev, keys.length - 1)
+      );
+    } catch (err) {
+      setError(err.message);
+      setBucketKeys([]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const openAddBucketKey = (role) => {
+    setError(null);
+    setStatusMessage(null);
+    if (role === 'put-only') {
+      const existingWrite = bucketKeys.find((u) => u.role === 'put-only');
+      if (existingWrite) {
+        setError(
+          `Only one write (put-only) key is allowed per bucket. Select "${existingWrite.userName}" and press 'r' to recreate or 'd' to revoke.`
+        );
+        return;
+      }
+    }
+    setAddKeyUserName('');
+    setAddKeyRole(role);
+  };
+
+  const cancelAddBucketKey = () => {
+    setAddKeyRole(null);
+    setAddKeyUserName('');
+    setError(null);
+  };
+
+  const submitAddBucketKey = async () => {
+    if (!selectedAccount || !selectedBucket || !addKeyRole) return;
+    const role = addKeyRole;
+    setLoading(true);
+    setError(null);
+    try {
+      const created = await createBucketIamUser(
+        selectedAccount,
+        selectedBucket.name,
+        role,
+        addKeyUserName
+      );
+      setAddKeyRole(null);
+      setAddKeyUserName('');
+      setCreatedIamResult({
+        bucketName: selectedBucket.name,
+        region: bucketRegion || selectedAccount.region || 'us-east-1',
+        users: [created],
+        isScopedIamUsers: true,
+        title: `${role === 'put-only' ? 'Write' : 'Read'} IAM key created for "${selectedBucket.name}" (${bucketRegion || selectedAccount.region || 'us-east-1'})`,
+      });
+      setStatusMessage(
+        `Created ${role === 'put-only' ? 'write (put-only)' : 'read (read-only)'} IAM user "${created.userName}".`
+      );
+      await loadBucketKeysAndHandleError(selectedAccount, selectedBucket.name);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const confirmBucketKeyAction = async () => {
+    const target = bucketKeys[selectedKeyIndex];
+    if (!selectedAccount || !selectedBucket || !target || !keyConfirmAction) return;
+    const action = keyConfirmAction;
+    setLoading(true);
+    setError(null);
+    try {
+      if (action === 'revoke') {
+        await revokeBucketIamUser(selectedAccount, target.userName);
+        setKeyConfirmAction(null);
+        setStatusMessage(`Revoked IAM user "${target.userName}".`);
+        await loadBucketKeysAndHandleError(selectedAccount, selectedBucket.name);
+      } else if (action === 'recreate') {
+        const recreated = await recreateBucketIamUser(
+          selectedAccount,
+          selectedBucket.name,
+          target.userName,
+          target.role
+        );
+        setKeyConfirmAction(null);
+        setCreatedIamResult({
+          bucketName: selectedBucket.name,
+          region: bucketRegion || selectedAccount.region || 'us-east-1',
+          users: [recreated],
+          isScopedIamUsers: true,
+          title: `IAM key recreated for "${target.userName}" (${selectedBucket.name})`,
+        });
+        setStatusMessage(`Recreated access key for "${target.userName}".`);
+        await loadBucketKeysAndHandleError(selectedAccount, selectedBucket.name);
+      }
+    } catch (err) {
+      setError(err.message);
+      setKeyConfirmAction(null);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   // Determine which context we're in
   const getCurrentList = () => {
     if (screen === 'manage-accounts') return accounts;
     if (screen === 's3-buckets') return buckets;
     if (screen === 's3-objects') return objects;
+    if (screen === 's3-keys') return bucketKeys;
     if (screen === 'rules') return rules;
     return records;
   };
@@ -612,6 +751,7 @@ const CLI = () => {
     if (screen === 'manage-accounts') return selectedAccountIndex;
     if (screen === 's3-buckets') return selectedBucketIndex;
     if (screen === 's3-objects') return selectedObjectIndex;
+    if (screen === 's3-keys') return selectedKeyIndex;
     if (screen === 'rules') return selectedRuleIndex;
     return selectedRecordIndex;
   };
@@ -622,16 +762,21 @@ const CLI = () => {
   // Keyboard navigation handlers
   const navigationActions = {
     handleDeleteConfirm:
-      screen === 'manage-accounts'
-        ? deleteAccount
-        : screen === 's3-buckets'
-          ? deleteBucket
-          : screen === 's3-objects'
-            ? deleteObject
-            : screen === 'rules'
-              ? deleteRule
-              : deleteRecord,
-    handleDeleteCancel: () => setShowDeleteConfirm(false),
+      screen === 's3-keys'
+        ? confirmBucketKeyAction
+        : screen === 'manage-accounts'
+          ? deleteAccount
+          : screen === 's3-buckets'
+            ? deleteBucket
+            : screen === 's3-objects'
+              ? deleteObject
+              : screen === 'rules'
+                ? deleteRule
+                : deleteRecord,
+    handleDeleteCancel: () => {
+      setShowDeleteConfirm(false);
+      setKeyConfirmAction(null);
+    },
     handleAddRecord: (recordType) => {
       if (screen === 'manage-accounts') {
         openAddAccount();
@@ -647,6 +792,8 @@ const CLI = () => {
         setShowAddBucket(true);
       } else if (screen === 's3-objects') {
         openUploadForm();
+      } else if (screen === 's3-keys') {
+        openAddBucketKey(recordType === 'put-only' ? 'put-only' : 'read-only');
       } else if (screen === 'rules') {
         setRuleData({ protocol: 'tcp', fromPort: 80, toPort: 80, source: '0.0.0.0/0', description: '' });
         setShowAddRule(true);
@@ -685,9 +832,47 @@ const CLI = () => {
         openDownloadForm();
       }
     },
+    handleManageKeys: () => {
+      if (screen === 's3-buckets') {
+        const bucket = buckets[selectedBucketIndex];
+        if (!bucket) return;
+        setSelectedBucket(bucket);
+        setKeysReturnScreen('s3-buckets');
+        setSelectedKeyIndex(0);
+        setBucketKeys([]);
+        setAddKeyRole(null);
+        setKeyConfirmAction(null);
+        setStatusMessage(null);
+        setError(null);
+        setScreen('s3-keys');
+      } else if (screen === 's3-objects' && selectedBucket) {
+        setKeysReturnScreen('s3-objects');
+        setSelectedKeyIndex(0);
+        setBucketKeys([]);
+        setAddKeyRole(null);
+        setKeyConfirmAction(null);
+        setStatusMessage(null);
+        setError(null);
+        setScreen('s3-keys');
+      }
+    },
+    handleRecreateKey: () => {
+      if (screen === 's3-keys' && bucketKeys[selectedKeyIndex]) {
+        setError(null);
+        setStatusMessage(null);
+        setKeyConfirmAction('recreate');
+      }
+    },
     handleDeleteRecord: () => {
       if (screen === 's3-objects' && objects[selectedObjectIndex]?.isFolder) {
         setError('Folders cannot be deleted directly. Open the folder and delete objects inside.');
+        return;
+      }
+      if (screen === 's3-keys') {
+        if (!bucketKeys[selectedKeyIndex]) return;
+        setError(null);
+        setStatusMessage(null);
+        setKeyConfirmAction('revoke');
         return;
       }
       setError(null);
@@ -701,6 +886,8 @@ const CLI = () => {
         setSelectedBucketIndex((prev) => Math.max(0, prev - 1));
       } else if (screen === 's3-objects') {
         setSelectedObjectIndex((prev) => Math.max(0, prev - 1));
+      } else if (screen === 's3-keys') {
+        setSelectedKeyIndex((prev) => Math.max(0, prev - 1));
       } else if (screen === 'rules') {
         setSelectedRuleIndex(prev => Math.max(0, prev - 1));
       } else {
@@ -714,6 +901,8 @@ const CLI = () => {
         setSelectedBucketIndex((prev) => Math.min(buckets.length - 1, prev + 1));
       } else if (screen === 's3-objects') {
         setSelectedObjectIndex((prev) => Math.min(objects.length - 1, prev + 1));
+      } else if (screen === 's3-keys') {
+        setSelectedKeyIndex((prev) => Math.min(bucketKeys.length - 1, prev + 1));
       } else if (screen === 'rules') {
         setSelectedRuleIndex(prev => Math.min(rules.length - 1, prev + 1));
       } else {
@@ -723,6 +912,8 @@ const CLI = () => {
     handleEscape: () => {
       if (createdIamResult) {
         dismissCreatedIamResult();
+      } else if (addKeyRole) {
+        cancelAddBucketKey();
       } else if (accountFormMode) {
         cancelAccountForm();
       } else if (objectFormMode) {
@@ -734,6 +925,14 @@ const CLI = () => {
         setShowAddRecord(false);
       } else if (showAddRule) {
         setShowAddRule(false);
+      } else if (screen === 's3-keys') {
+        setScreen(keysReturnScreen || 's3-buckets');
+        setBucketKeys([]);
+        setSelectedKeyIndex(0);
+        setAddKeyRole(null);
+        setKeyConfirmAction(null);
+        setStatusMessage(null);
+        setError(null);
       } else if (screen === 's3-objects') {
         if (bucketPrefix) {
           setBucketPrefix(getParentPrefix(bucketPrefix));
@@ -791,8 +990,9 @@ const CLI = () => {
       showAddBucket ||
       Boolean(accountFormMode) ||
       Boolean(objectFormMode) ||
+      Boolean(addKeyRole) ||
       Boolean(createdIamResult),
-    showDeleteConfirm,
+    showDeleteConfirm: showDeleteConfirm || Boolean(keyConfirmAction),
     records: currentRecords,
     selectedRecordIndex: currentIndex,
   };
@@ -861,6 +1061,15 @@ const CLI = () => {
       setObjectFormData={setObjectFormData}
       submitObjectForm={submitObjectForm}
       cancelObjectForm={cancelObjectForm}
+      bucketRegion={bucketRegion}
+      bucketKeys={bucketKeys}
+      selectedKeyIndex={selectedKeyIndex}
+      addKeyRole={addKeyRole}
+      addKeyUserName={addKeyUserName}
+      setAddKeyUserName={setAddKeyUserName}
+      submitAddBucketKey={submitAddBucketKey}
+      cancelAddBucketKey={cancelAddBucketKey}
+      keyConfirmAction={keyConfirmAction}
     />
   );
 };

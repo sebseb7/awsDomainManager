@@ -6,7 +6,7 @@ mod route53;
 mod s3;
 
 use ec2::{AddRuleInput, InboundRuleDto, SecurityGroupDto};
-use iam::CreatedIamUserDto;
+use iam::{BucketIamUserDto, CreatedIamUserDto};
 use profiles::{AccountInput, AwsProfile};
 use route53::{DnsRecordDto, HostedZoneDto, RecordInput};
 use s3::{BucketDto, S3ObjectDto};
@@ -154,6 +154,11 @@ async fn delete_object(
 }
 
 #[tauri::command]
+async fn get_bucket_region(profile: String, bucket_name: String) -> Result<String, String> {
+    s3::get_bucket_region(&profile, &bucket_name).await
+}
+
+#[tauri::command]
 async fn create_bucket_iam_users(
     profile: String,
     bucket_name: String,
@@ -161,6 +166,39 @@ async fn create_bucket_iam_users(
     custom_user_name: String,
 ) -> Result<Vec<CreatedIamUserDto>, String> {
     iam::create_bucket_iam_users(&profile, &bucket_name, &access_mode, &custom_user_name).await
+}
+
+#[tauri::command]
+async fn list_bucket_iam_users(
+    profile: String,
+    bucket_name: String,
+) -> Result<Vec<BucketIamUserDto>, String> {
+    iam::list_bucket_iam_users(&profile, &bucket_name).await
+}
+
+#[tauri::command]
+async fn create_bucket_iam_user(
+    profile: String,
+    bucket_name: String,
+    role: String,
+    custom_user_name: String,
+) -> Result<CreatedIamUserDto, String> {
+    iam::create_bucket_iam_user(&profile, &bucket_name, &role, &custom_user_name).await
+}
+
+#[tauri::command]
+async fn recreate_bucket_iam_user(
+    profile: String,
+    bucket_name: String,
+    user_name: String,
+    role: String,
+) -> Result<CreatedIamUserDto, String> {
+    iam::recreate_bucket_iam_user(&profile, &bucket_name, &user_name, &role).await
+}
+
+#[tauri::command]
+async fn revoke_bucket_iam_user(profile: String, user_name: String) -> Result<(), String> {
+    iam::revoke_bucket_iam_user(&profile, &user_name).await
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -187,7 +225,12 @@ pub fn run() {
             upload_object,
             download_object,
             delete_object,
-            create_bucket_iam_users
+            get_bucket_region,
+            create_bucket_iam_users,
+            list_bucket_iam_users,
+            create_bucket_iam_user,
+            recreate_bucket_iam_user,
+            revoke_bucket_iam_user
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -59,6 +59,36 @@ pub fn validate_bucket_name(name: &str) -> Result<String, String> {
     Ok(trimmed.to_string())
 }
 
+pub async fn get_bucket_region(profile: &str, bucket_name: &str) -> Result<String, String> {
+    let base_config = build_sdk_config(profile, None).await?;
+    let fallback_region = base_config
+        .region()
+        .map(|r| r.as_ref().to_string())
+        .unwrap_or_else(|| "us-east-1".to_string());
+    let base_client = Client::new(&base_config);
+
+    if let Ok(loc) = base_client
+        .get_bucket_location()
+        .bucket(bucket_name)
+        .send()
+        .await
+    {
+        let region_str = match loc.location_constraint() {
+            Some(c) if !c.as_str().is_empty() => {
+                if c.as_str() == "EU" {
+                    "eu-west-1".to_string()
+                } else {
+                    c.as_str().to_string()
+                }
+            }
+            _ => "us-east-1".to_string(),
+        };
+        return Ok(region_str);
+    }
+
+    Ok(fallback_region)
+}
+
 async fn client_for_bucket(profile: &str, bucket_name: &str) -> Result<Client, String> {
     let base_config = build_sdk_config(profile, None).await?;
     let base_client = Client::new(&base_config);

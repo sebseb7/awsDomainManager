@@ -77,14 +77,14 @@ const BucketObjectsScreen = ({
       {!objectFormMode && !showDeleteConfirm && objects.length > 0 && !loading && (
         <Box marginTop={1}>
           <Text dimColor>
-            Use ↑/↓ arrows, Enter to open folder, u to upload, g to download, d to delete, or Esc to go back
+            Use ↑/↓ arrows, Enter to open folder, k for IAM keys, u to upload, g to download, d to delete, or Esc to go back
           </Text>
         </Box>
       )}
 
       {!objectFormMode && !showDeleteConfirm && objects.length === 0 && !loading && (
         <Box marginTop={1}>
-          <Text dimColor>Press u to upload a file, or Esc to go back</Text>
+          <Text dimColor>Press u to upload a file, k for IAM keys, or Esc to go back</Text>
         </Box>
       )}
     </Box>

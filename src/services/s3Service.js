@@ -8,6 +8,7 @@ import {
   ListBucketsCommand,
   CreateBucketCommand,
   DeleteBucketCommand,
+  GetBucketLocationCommand,
   ListObjectsV2Command,
   PutObjectCommand,
   GetObjectCommand,
@@ -105,6 +106,26 @@ export const getParentPrefix = (prefix) => {
   const withoutTrailing = prefix.endsWith('/') ? prefix.slice(0, -1) : prefix;
   const lastSlash = withoutTrailing.lastIndexOf('/');
   return lastSlash >= 0 ? withoutTrailing.slice(0, lastSlash + 1) : '';
+};
+
+/**
+ * Resolve the AWS region for an existing S3 bucket
+ * @param {Object} account
+ * @param {string} bucketName
+ * @returns {Promise<string>}
+ */
+export const getBucketRegion = async (account, bucketName) => {
+  const fallback = account.region || 'us-east-1';
+  try {
+    const client = createS3Client(account);
+    const resp = await client.send(new GetBucketLocationCommand({ Bucket: bucketName }));
+    const loc = resp.LocationConstraint;
+    if (!loc) return 'us-east-1';
+    if (loc === 'EU') return 'eu-west-1';
+    return loc;
+  } catch {
+    return fallback;
+  }
 };
 
 /**

@@ -421,6 +421,58 @@ tbody tr:hover {
   max-width: 640px;
 }
 
+.modal-xl {
+  max-width: 780px;
+}
+
+.keys-section {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-card);
+  overflow: hidden;
+}
+
+.keys-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+  background: rgba(0, 0, 0, 0.14);
+  flex-wrap: wrap;
+}
+
+.keys-empty {
+  padding: 14px;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.inline-key-form {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.inline-key-form input {
+  flex: 1;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text);
+  padding: 6px 10px;
+  font-size: 13px;
+  outline: none;
+}
+
+.inline-key-form input:focus {
+  border-color: var(--accent);
+}
+
 .modal-header {
   padding: 16px 20px;
   border-bottom: 1px solid var(--border);

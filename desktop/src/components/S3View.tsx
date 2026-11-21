@@ -5,6 +5,7 @@ import {
   Download,
   File as FileIcon,
   Folder,
+  KeyRound,
   Plus,
   RefreshCw,
   Trash2,
@@ -13,6 +14,7 @@ import {
 import { api, formatBytes, formatDate } from '../api';
 import type { AwsProfile, CreatedIamUser, S3Bucket, S3Object } from '../types';
 import { QrCredentialsModal } from './QrCredentialsModal';
+import { BucketKeysModal } from './BucketKeysModal';
 
 interface Props {
   account: AwsProfile;
@@ -50,6 +52,7 @@ export const S3View: React.FC<Props> = ({ account, onError, onSuccess }) => {
 
   const [deleteBucketTarget, setDeleteBucketTarget] = useState<string | null>(null);
   const [deleteObjTarget, setDeleteObjTarget] = useState<S3Object | null>(null);
+  const [keysBucketTarget, setKeysBucketTarget] = useState<string | null>(null);
 
   const loadBuckets = async () => {
     setLoading(true);
@@ -248,7 +251,7 @@ export const S3View: React.FC<Props> = ({ account, onError, onSuccess }) => {
                   <tr>
                     <th>Bucket Name</th>
                     <th>Created</th>
-                    <th style={{ width: 90 }}>Actions</th>
+                    <th style={{ width: 145 }}>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -268,12 +271,22 @@ export const S3View: React.FC<Props> = ({ account, onError, onSuccess }) => {
                         {formatDate(b.creationDate)}
                       </td>
                       <td onClick={(e) => e.stopPropagation()}>
-                        <button
-                          className="btn btn-danger btn-sm"
-                          onClick={() => setDeleteBucketTarget(b.name)}
-                        >
-                          <Trash2 size={13} />
-                        </button>
+                        <div style={{ display: 'flex', gap: 6 }}>
+                          <button
+                            className="btn btn-sm"
+                            title="Manage IAM Keys"
+                            onClick={() => setKeysBucketTarget(b.name)}
+                          >
+                            <KeyRound size={13} /> Keys
+                          </button>
+                          <button
+                            className="btn btn-danger btn-sm"
+                            title="Delete Bucket"
+                            onClick={() => setDeleteBucketTarget(b.name)}
+                          >
+                            <Trash2 size={13} />
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   ))}
@@ -379,6 +392,16 @@ export const S3View: React.FC<Props> = ({ account, onError, onSuccess }) => {
             onClose={() => setCreatedResult(null)}
           />
         )}
+
+        {keysBucketTarget && (
+          <BucketKeysModal
+            account={account}
+            bucketName={keysBucketTarget}
+            onClose={() => setKeysBucketTarget(null)}
+            onError={onError}
+            onSuccess={onSuccess}
+          />
+        )}
       </div>
     );
   }
@@ -411,6 +434,13 @@ export const S3View: React.FC<Props> = ({ account, onError, onSuccess }) => {
           </div>
         </div>
         <div className="toolbar-group">
+          <button
+            className="btn"
+            onClick={() => setKeysBucketTarget(selectedBucket)}
+            disabled={loading}
+          >
+            <KeyRound size={14} /> IAM Keys
+          </button>
           <button
             className="btn"
             onClick={() => loadObjects(selectedBucket, prefix)}
@@ -516,6 +546,16 @@ export const S3View: React.FC<Props> = ({ account, onError, onSuccess }) => {
             </div>
           </div>
         </div>
+      )}
+
+      {keysBucketTarget && (
+        <BucketKeysModal
+          account={account}
+          bucketName={keysBucketTarget}
+          onClose={() => setKeysBucketTarget(null)}
+          onError={onError}
+          onSuccess={onSuccess}
+        />
       )}
     </div>
   );
