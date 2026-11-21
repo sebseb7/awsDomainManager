@@ -155,7 +155,8 @@ jobs:
         env:
           RUSTC_WRAPPER: sccache
           SCCACHE_DIR: ${{ runner.temp }}/sccache-cache
-        run: cargo build --release --manifest-path desktop/src-tauri/Cargo.toml
+          MACOSX_DEPLOYMENT_TARGET: '10.13'
+        run: cargo build --release --features tauri/custom-protocol --manifest-path desktop/src-tauri/Cargo.toml
 
       - name: Show sccache statistics
         if: always()
