@@ -4,12 +4,14 @@ mod iam;
 mod profiles;
 mod route53;
 mod s3;
+mod ses;
 
 use ec2::{AddRuleInput, InboundRuleDto, SecurityGroupDto};
 use iam::{BucketIamUserDto, CreatedIamUserDto};
 use profiles::{AccountInput, AwsProfile};
 use route53::{DnsRecordDto, HostedZoneDto, RecordInput};
 use s3::{BucketDto, S3ObjectDto};
+use ses::SesIdentityDto;
 
 #[tauri::command]
 fn list_profiles() -> Result<Vec<AwsProfile>, String> {
@@ -201,6 +203,21 @@ async fn revoke_bucket_iam_user(profile: String, user_name: String) -> Result<()
     iam::revoke_bucket_iam_user(&profile, &user_name).await
 }
 
+#[tauri::command]
+async fn list_ses_identities(profile: String) -> Result<Vec<SesIdentityDto>, String> {
+    ses::list_ses_identities(&profile).await
+}
+
+#[tauri::command]
+async fn create_ses_identity(profile: String, identity_name: String) -> Result<String, String> {
+    ses::create_ses_identity(&profile, &identity_name).await
+}
+
+#[tauri::command]
+async fn delete_ses_identity(profile: String, identity_name: String) -> Result<(), String> {
+    ses::delete_ses_identity(&profile, &identity_name).await
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -230,7 +247,10 @@ pub fn run() {
             list_bucket_iam_users,
             create_bucket_iam_user,
             recreate_bucket_iam_user,
-            revoke_bucket_iam_user
+            revoke_bucket_iam_user,
+            list_ses_identities,
+            create_ses_identity,
+            delete_ses_identity
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

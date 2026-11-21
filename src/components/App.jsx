@@ -10,11 +10,13 @@ import ManageAccountsScreen from './screens/ManageAccountsScreen.jsx';
 import BucketScreen from './screens/BucketScreen.jsx';
 import BucketObjectsScreen from './screens/BucketObjectsScreen.jsx';
 import BucketKeysScreen from './screens/BucketKeysScreen.jsx';
+import SesScreen from './screens/SesScreen.jsx';
 
 const getTitle = (selectedResource) => {
   if (!selectedResource) return 'AWS Domain Manager';
   if (selectedResource.id === 'ec2') return 'EC2 Security Group Inbound Rules Manager';
   if (selectedResource.id === 's3') return 'S3 Bucket Manager';
+  if (selectedResource.id === 'ses') return 'Amazon SES Identity Manager (Domains & Email Addresses)';
   if (selectedResource.id === 'accounts') return 'AWS Account Manager';
   return 'Route53 DNS Record Manager';
 };
@@ -89,6 +91,13 @@ const App = (props) => {
     submitAddBucketKey,
     cancelAddBucketKey,
     keyConfirmAction,
+    sesIdentities,
+    selectedSesIndex,
+    showAddSesIdentity,
+    setShowAddSesIdentity,
+    sesIdentityInput,
+    setSesIdentityInput,
+    addSesIdentity,
   } = props;
 
   const renderScreen = () => {
@@ -246,6 +255,23 @@ const App = (props) => {
             keyConfirmAction={keyConfirmAction}
             createdIamResult={createdIamResult}
             dismissCreatedIamResult={dismissCreatedIamResult}
+            statusMessage={statusMessage}
+          />
+        );
+
+      case 'ses-identities':
+        return (
+          <SesScreen
+            selectedAccount={selectedAccount}
+            sesIdentities={sesIdentities}
+            loading={loading}
+            selectedSesIndex={selectedSesIndex}
+            showAddSesIdentity={showAddSesIdentity}
+            setShowAddSesIdentity={setShowAddSesIdentity}
+            sesIdentityInput={sesIdentityInput}
+            setSesIdentityInput={setSesIdentityInput}
+            addSesIdentity={addSesIdentity}
+            showDeleteConfirm={showDeleteConfirm}
             statusMessage={statusMessage}
           />
         );

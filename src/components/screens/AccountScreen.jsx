@@ -25,6 +25,8 @@ const AccountScreen = ({
             setScreen('sg');
           } else if (selectedResource?.id === 's3') {
             setScreen('s3-buckets');
+          } else if (selectedResource?.id === 'ses') {
+            setScreen('ses-identities');
           } else {
             setScreen('zone');
           }

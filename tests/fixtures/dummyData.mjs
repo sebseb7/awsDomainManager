@@ -214,3 +214,54 @@ export const DUMMY_RECREATED_CREDENTIAL = {
   accessKeyId: 'AKIAWRITE9999ROTATED',
   secretAccessKey: '9b71d224bd62f3785d96d46ad3ea3d73319bfEXAMPLE',
 };
+
+export const DUMMY_SES_IDENTITIES = [
+  {
+    identityName: 'example.com',
+    identityType: 'DOMAIN',
+    typeLabel: 'Domain',
+    verificationStatus: 'SUCCESS',
+    dkimStatus: 'SUCCESS',
+    sendingEnabled: true,
+  },
+  {
+    identityName: 'mail.example.com',
+    identityType: 'DOMAIN',
+    typeLabel: 'Domain',
+    verificationStatus: 'SUCCESS',
+    dkimStatus: 'SUCCESS',
+    sendingEnabled: true,
+  },
+  {
+    identityName: 'staging.example.com',
+    identityType: 'DOMAIN',
+    typeLabel: 'Domain',
+    verificationStatus: 'PENDING',
+    dkimStatus: 'PENDING',
+    sendingEnabled: false,
+  },
+  {
+    identityName: 'alerts@example.com',
+    identityType: 'EMAIL_ADDRESS',
+    typeLabel: 'Email',
+    verificationStatus: 'SUCCESS',
+    dkimStatus: 'SUCCESS',
+    sendingEnabled: true,
+  },
+  {
+    identityName: 'noreply@example.com',
+    identityType: 'EMAIL_ADDRESS',
+    typeLabel: 'Email',
+    verificationStatus: 'SUCCESS',
+    dkimStatus: 'SUCCESS',
+    sendingEnabled: true,
+  },
+  {
+    identityName: 'dev-team@staging.example.com',
+    identityType: 'EMAIL_ADDRESS',
+    typeLabel: 'Email',
+    verificationStatus: 'PENDING',
+    dkimStatus: '-',
+    sendingEnabled: false,
+  },
+];

@@ -29,6 +29,11 @@ import {
   recreateBucketIamUser,
   revokeBucketIamUser,
 } from './services/iamService.js';
+import {
+  loadSesIdentities,
+  createSesIdentity as createSesIdentityService,
+  deleteSesIdentity as deleteSesIdentityService,
+} from './services/sesService.js';
 import { useKeyboardNavigation } from './hooks/useKeyboardNavigation.js';
 
 const EMPTY_ACCOUNT_FORM = {
@@ -107,6 +112,12 @@ const CLI = () => {
   const [keyConfirmAction, setKeyConfirmAction] = useState(null); // null | 'revoke' | 'recreate'
   const [keysReturnScreen, setKeysReturnScreen] = useState('s3-buckets');
 
+  // Amazon SES state
+  const [sesIdentities, setSesIdentities] = useState([]);
+  const [selectedSesIndex, setSelectedSesIndex] = useState(0);
+  const [showAddSesIdentity, setShowAddSesIdentity] = useState(false);
+  const [sesIdentityInput, setSesIdentityInput] = useState('');
+
   // Shared state
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -165,6 +176,13 @@ const CLI = () => {
     }
   }, [selectedAccount, selectedBucket, screen]);
 
+  // Load Amazon SES identities when account is selected (SES flow)
+  useEffect(() => {
+    if (selectedAccount && screen === 'ses-identities' && selectedResource?.id === 'ses') {
+      loadSesIdentitiesAndHandleError(selectedAccount);
+    }
+  }, [selectedAccount, screen, selectedResource]);
+
   // Reset state when switching resources
   useEffect(() => {
     if (selectedResource) {
@@ -190,6 +208,10 @@ const CLI = () => {
       setAddKeyRole(null);
       setAddKeyUserName('');
       setKeyConfirmAction(null);
+      setSesIdentities([]);
+      setSelectedSesIndex(0);
+      setShowAddSesIdentity(false);
+      setSesIdentityInput('');
       setSelectedRecordIndex(0);
       setSelectedRuleIndex(0);
       setSelectedAccountIndex(0);
@@ -737,12 +759,66 @@ const CLI = () => {
     }
   };
 
+  // Amazon SES: Load, create, delete identities
+  const loadSesIdentitiesAndHandleError = async (account) => {
+    setLoading(true);
+    setError(null);
+    try {
+      const loaded = await loadSesIdentities(account);
+      setSesIdentities(loaded);
+      setSelectedSesIndex((prev) =>
+        loaded.length === 0 ? 0 : Math.min(prev, loaded.length - 1)
+      );
+    } catch (err) {
+      setError(err.message);
+      setSesIdentities([]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const addSesIdentity = async () => {
+    if (!selectedAccount) return;
+    setLoading(true);
+    setError(null);
+    try {
+      const created = await createSesIdentityService(selectedAccount, sesIdentityInput);
+      setShowAddSesIdentity(false);
+      setSesIdentityInput('');
+      setStatusMessage(`Created SES identity "${created}".`);
+      await loadSesIdentitiesAndHandleError(selectedAccount);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const deleteSesIdentity = async () => {
+    const target = sesIdentities[selectedSesIndex];
+    if (!selectedAccount || !target) return;
+    setLoading(true);
+    setError(null);
+    try {
+      await deleteSesIdentityService(selectedAccount, target.identityName);
+      setShowDeleteConfirm(false);
+      setStatusMessage(`Deleted SES identity "${target.identityName}".`);
+      await loadSesIdentitiesAndHandleError(selectedAccount);
+    } catch (err) {
+      setError(err.message);
+      setShowDeleteConfirm(false);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   // Determine which context we're in
   const getCurrentList = () => {
     if (screen === 'manage-accounts') return accounts;
     if (screen === 's3-buckets') return buckets;
     if (screen === 's3-objects') return objects;
     if (screen === 's3-keys') return bucketKeys;
+    if (screen === 'ses-identities') return sesIdentities;
     if (screen === 'rules') return rules;
     return records;
   };
@@ -752,6 +828,7 @@ const CLI = () => {
     if (screen === 's3-buckets') return selectedBucketIndex;
     if (screen === 's3-objects') return selectedObjectIndex;
     if (screen === 's3-keys') return selectedKeyIndex;
+    if (screen === 'ses-identities') return selectedSesIndex;
     if (screen === 'rules') return selectedRuleIndex;
     return selectedRecordIndex;
   };
@@ -764,15 +841,17 @@ const CLI = () => {
     handleDeleteConfirm:
       screen === 's3-keys'
         ? confirmBucketKeyAction
-        : screen === 'manage-accounts'
-          ? deleteAccount
-          : screen === 's3-buckets'
-            ? deleteBucket
-            : screen === 's3-objects'
-              ? deleteObject
-              : screen === 'rules'
-                ? deleteRule
-                : deleteRecord,
+        : screen === 'ses-identities'
+          ? deleteSesIdentity
+          : screen === 'manage-accounts'
+            ? deleteAccount
+            : screen === 's3-buckets'
+              ? deleteBucket
+              : screen === 's3-objects'
+                ? deleteObject
+                : screen === 'rules'
+                  ? deleteRule
+                  : deleteRecord,
     handleDeleteCancel: () => {
       setShowDeleteConfirm(false);
       setKeyConfirmAction(null);
@@ -794,6 +873,11 @@ const CLI = () => {
         openUploadForm();
       } else if (screen === 's3-keys') {
         openAddBucketKey(recordType === 'put-only' ? 'put-only' : 'read-only');
+      } else if (screen === 'ses-identities') {
+        setError(null);
+        setStatusMessage(null);
+        setSesIdentityInput('');
+        setShowAddSesIdentity(true);
       } else if (screen === 'rules') {
         setRuleData({ protocol: 'tcp', fromPort: 80, toPort: 80, source: '0.0.0.0/0', description: '' });
         setShowAddRule(true);
@@ -888,6 +972,8 @@ const CLI = () => {
         setSelectedObjectIndex((prev) => Math.max(0, prev - 1));
       } else if (screen === 's3-keys') {
         setSelectedKeyIndex((prev) => Math.max(0, prev - 1));
+      } else if (screen === 'ses-identities') {
+        setSelectedSesIndex((prev) => Math.max(0, prev - 1));
       } else if (screen === 'rules') {
         setSelectedRuleIndex(prev => Math.max(0, prev - 1));
       } else {
@@ -903,6 +989,8 @@ const CLI = () => {
         setSelectedObjectIndex((prev) => Math.min(objects.length - 1, prev + 1));
       } else if (screen === 's3-keys') {
         setSelectedKeyIndex((prev) => Math.min(bucketKeys.length - 1, prev + 1));
+      } else if (screen === 'ses-identities') {
+        setSelectedSesIndex((prev) => Math.min(sesIdentities.length - 1, prev + 1));
       } else if (screen === 'rules') {
         setSelectedRuleIndex(prev => Math.min(rules.length - 1, prev + 1));
       } else {
@@ -914,6 +1002,9 @@ const CLI = () => {
         dismissCreatedIamResult();
       } else if (addKeyRole) {
         cancelAddBucketKey();
+      } else if (showAddSesIdentity) {
+        setShowAddSesIdentity(false);
+        setError(null);
       } else if (accountFormMode) {
         cancelAccountForm();
       } else if (objectFormMode) {
@@ -955,6 +1046,14 @@ const CLI = () => {
         setSelectedBucketIndex(0);
         setStatusMessage(null);
         setError(null);
+      } else if (screen === 'ses-identities') {
+        setScreen('account');
+        setSelectedAccount(null);
+        setSesIdentities([]);
+        setSelectedSesIndex(0);
+        setShowAddSesIdentity(false);
+        setStatusMessage(null);
+        setError(null);
       } else if (screen === 'records' || screen === 'rules') {
         if (screen === 'records') {
           setScreen('zone');
@@ -988,6 +1087,7 @@ const CLI = () => {
       showAddRecord ||
       showAddRule ||
       showAddBucket ||
+      showAddSesIdentity ||
       Boolean(accountFormMode) ||
       Boolean(objectFormMode) ||
       Boolean(addKeyRole) ||
@@ -1070,6 +1170,13 @@ const CLI = () => {
       submitAddBucketKey={submitAddBucketKey}
       cancelAddBucketKey={cancelAddBucketKey}
       keyConfirmAction={keyConfirmAction}
+      sesIdentities={sesIdentities}
+      selectedSesIndex={selectedSesIndex}
+      showAddSesIdentity={showAddSesIdentity}
+      setShowAddSesIdentity={setShowAddSesIdentity}
+      sesIdentityInput={sesIdentityInput}
+      setSesIdentityInput={setSesIdentityInput}
+      addSesIdentity={addSesIdentity}
     />
   );
 };

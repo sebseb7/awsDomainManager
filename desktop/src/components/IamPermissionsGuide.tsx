@@ -11,6 +11,7 @@ export const IamPermissionsGuide: React.FC<Props> = ({ defaultExpanded = false }
   const [includeEc2, setIncludeEc2] = useState(true);
   const [includeS3, setIncludeS3] = useState(true);
   const [includeIamBucketUsers, setIncludeIamBucketUsers] = useState(true);
+  const [includeSes, setIncludeSes] = useState(true);
   const [readOnly, setReadOnly] = useState(false);
   const [copied, setCopied] = useState(false);
 
@@ -103,6 +104,37 @@ export const IamPermissionsGuide: React.FC<Props> = ({ defaultExpanded = false }
       });
     }
 
+    if (includeSes) {
+      statements.push({
+        Sid: 'SESListIdentities',
+        Effect: 'Allow',
+        Action: ['ses:ListEmailIdentities', 'ses:ListIdentities'],
+        Resource: '*',
+      });
+      statements.push({
+        Sid: 'SESManageIdentities',
+        Effect: 'Allow',
+        Action: readOnly
+          ? [
+              'ses:GetEmailIdentity',
+              'ses:GetIdentityVerificationAttributes',
+              'ses:GetIdentityDkimAttributes',
+            ]
+          : [
+              'ses:GetEmailIdentity',
+              'ses:GetIdentityVerificationAttributes',
+              'ses:GetIdentityDkimAttributes',
+              'ses:CreateEmailIdentity',
+              'ses:DeleteEmailIdentity',
+              'ses:VerifyDomainIdentity',
+              'ses:VerifyDomainDkim',
+              'ses:VerifyEmailIdentity',
+              'ses:DeleteIdentity',
+            ],
+        Resource: '*',
+      });
+    }
+
     return JSON.stringify(
       {
         Version: '2012-10-17',
@@ -111,7 +143,7 @@ export const IamPermissionsGuide: React.FC<Props> = ({ defaultExpanded = false }
       null,
       2
     );
-  }, [includeRoute53, includeEc2, includeS3, includeIamBucketUsers, readOnly]);
+  }, [includeRoute53, includeEc2, includeS3, includeIamBucketUsers, includeSes, readOnly]);
 
   const handleCopy = async () => {
     await navigator.clipboard.writeText(policyJson);
@@ -180,6 +212,14 @@ export const IamPermissionsGuide: React.FC<Props> = ({ defaultExpanded = false }
                 onChange={(e) => setIncludeIamBucketUsers(e.target.checked)}
               />
               <span>Per-Bucket IAM Users</span>
+            </label>
+            <label className="perm-check">
+              <input
+                type="checkbox"
+                checked={includeSes}
+                onChange={(e) => setIncludeSes(e.target.checked)}
+              />
+              <span>Amazon SES Identities</span>
             </label>
             <label className="perm-check perm-check-readonly">
               <input

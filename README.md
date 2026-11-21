@@ -3,7 +3,7 @@
 [![CI Build](https://github.com/sebseb7/awsDomainManager/actions/workflows/ci.yml/badge.svg)](https://github.com/sebseb7/awsDomainManager/actions/workflows/ci.yml)
 [![Release Desktop App](https://github.com/sebseb7/awsDomainManager/actions/workflows/release.yml/badge.svg)](https://github.com/sebseb7/awsDomainManager/actions/workflows/release.yml)
 
-A terminal-based and native desktop UI tool for managing AWS Route53, EC2 Security Groups, S3 Buckets (with scoped IAM key management), and AWS credential profiles across multiple accounts.
+A terminal-based and native desktop UI tool for managing AWS Route53, EC2 Security Groups, S3 Buckets (with scoped IAM key management), Amazon SES Identities (domains & email addresses), and AWS credential profiles across multiple accounts.
 
 ## Screenshots
 
@@ -17,9 +17,9 @@ A terminal-based and native desktop UI tool for managing AWS Route53, EC2 Securi
 | :---: | :---: |
 | ![Desktop S3 IAM Keys](docs/desktop-s3-keys.png) | ![Desktop S3 QR Credentials](docs/desktop-s3-qr.png) |
 
-| AWS Accounts & Minimum IAM Permissions Guide |
-| :---: |
-| ![Desktop Accounts](docs/desktop-accounts.png) |
+| Amazon SES Identities (Domains & Email Addresses) | AWS Accounts & Minimum IAM Permissions Guide |
+| :---: | :---: |
+| ![Desktop Amazon SES](docs/desktop-ses.png) | ![Desktop Accounts](docs/desktop-accounts.png) |
 
 ### Terminal UI (TUI)
 
@@ -27,9 +27,9 @@ A terminal-based and native desktop UI tool for managing AWS Route53, EC2 Securi
 | :---: | :---: |
 | ![TUI Route53](docs/tui-route53.png) | ![TUI S3 IAM Keys](docs/tui-s3-keys.png) |
 
-| Recreated IAM Key & Terminal QR Code |
-| :---: |
-| ![TUI S3 QR Credentials](docs/tui-s3-qr.png) |
+| Amazon SES Identities | Recreated IAM Key & Terminal QR Code |
+| :---: | :---: |
+| ![TUI Amazon SES](docs/tui-ses.png) | ![TUI S3 QR Credentials](docs/tui-s3-qr.png) |
 
 > Screenshots are generated automatically with dummy data by running `npm test` (Playwright + Ink).
 
@@ -54,6 +54,7 @@ npm i . && npm run build && npm run start
 - **Route53 DNS Records** — Manage A/AAAA/CNAME/MX/TXT/NS records across hosted zones
 - **EC2 Security Groups** — View, add, and delete inbound rules for security groups
 - **S3 Buckets** — List, create (with optional scoped Put-Only and/or Read-Only IAM user creation — never delete — plus a scannable QR code of bucket & credentials), and delete S3 buckets; manage per-bucket IAM keys (revoke/recreate read & write keys, multiple read keys allowed, max 1 write key per bucket); and browse prefixes/folders to upload, download, or delete objects
+- **Amazon SES Identities** — List, filter, add, and delete domain and email address identities with verification, DKIM, and sending status
 - **AWS Account Management** — Add, edit, and remove AWS credential profiles (`~/.aws/credentials` and `~/.aws/config`) directly from the tool
 - Terminal UI with keyboard navigation
 - Support for AWS credential profiles
@@ -193,6 +194,31 @@ Create a dedicated IAM user for this tool instead of using root or `Administrato
         "iam:GetAccessKeyLastUsed"
       ],
       "Resource": "arn:aws:iam::*:user/s3-bucket-users/*"
+    },
+    {
+      "Sid": "SESListIdentities",
+      "Effect": "Allow",
+      "Action": [
+        "ses:ListEmailIdentities",
+        "ses:ListIdentities"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "SESManageIdentities",
+      "Effect": "Allow",
+      "Action": [
+        "ses:GetEmailIdentity",
+        "ses:GetIdentityVerificationAttributes",
+        "ses:GetIdentityDkimAttributes",
+        "ses:CreateEmailIdentity",
+        "ses:DeleteEmailIdentity",
+        "ses:VerifyDomainIdentity",
+        "ses:VerifyDomainDkim",
+        "ses:VerifyEmailIdentity",
+        "ses:DeleteIdentity"
+      ],
+      "Resource": "*"
     }
   ]
 }

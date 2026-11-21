@@ -1,6 +1,6 @@
 import { useInput } from 'ink';
 
-const LIST_SCREENS = ['records', 'rules', 'manage-accounts', 's3-buckets', 's3-objects', 's3-keys'];
+const LIST_SCREENS = ['records', 'rules', 'manage-accounts', 's3-buckets', 's3-objects', 's3-keys', 'ses-identities'];
 
 /**
  * Custom hook for handling global keyboard navigation
@@ -51,10 +51,10 @@ export const useKeyboardNavigation = (navigationState, navigationActions) => {
       return;
     }
 
-    // Handle 'a' to add a rule, AWS account, or S3 bucket
+    // Handle 'a' to add a rule, AWS account, S3 bucket, or SES identity
     if (
       input === 'a' &&
-      (screen === 'rules' || screen === 'manage-accounts' || screen === 's3-buckets') &&
+      (screen === 'rules' || screen === 'manage-accounts' || screen === 's3-buckets' || screen === 'ses-identities') &&
       !showAddRecord
     ) {
       handleAddRecord();

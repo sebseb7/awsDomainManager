@@ -14,6 +14,7 @@ import {
   DUMMY_BUCKETS,
   DUMMY_BUCKET_IAM_USERS,
   DUMMY_RECREATED_CREDENTIAL,
+  DUMMY_SES_IDENTITIES,
 } from './fixtures/dummyData.mjs';
 
 mkdirSync('docs', { recursive: true });
@@ -102,6 +103,13 @@ const BASE_TUI_PROPS = {
   submitAddBucketKey: () => {},
   cancelAddBucketKey: () => {},
   keyConfirmAction: null,
+  sesIdentities: DUMMY_SES_IDENTITIES,
+  selectedSesIndex: 0,
+  showAddSesIdentity: false,
+  setShowAddSesIdentity: () => {},
+  sesIdentityInput: '',
+  setSesIdentityInput: () => {},
+  addSesIdentity: () => {},
 };
 
 test('TUI: Route53 DNS Records screenshot', async ({ page }) => {
@@ -179,5 +187,30 @@ test('TUI: Recreated IAM Key with terminal QR code screenshot', async ({ page })
     ansi,
     'docs/tui-s3-qr.png',
     'aws-domain-manager — Recreated IAM Key & QR Code'
+  );
+});
+
+test('TUI: Amazon SES Identities (Domains & Email Addresses) screenshot', async ({ page }) => {
+  const ansi = await renderInkToAnsi(
+    <App
+      {...BASE_TUI_PROPS}
+      screen="ses-identities"
+      selectedResource={{ id: 'ses', name: 'Amazon SES' }}
+      selectedSesIndex={0}
+    />,
+    { columns: 108, rows: 26 }
+  );
+
+  const plain = stripAnsi(ansi);
+  expect(plain).toContain('Amazon SES Identity Manager');
+  expect(plain).toContain('Domains: 3');
+  expect(plain).toContain('Email Addresses: 3');
+  expect(plain).toContain('alerts@example.com');
+
+  await screenshotAnsiTerminal(
+    page,
+    ansi,
+    'docs/tui-ses.png',
+    'aws-domain-manager — Amazon SES Identities'
   );
 });

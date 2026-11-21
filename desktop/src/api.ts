@@ -12,6 +12,7 @@ import type {
   S3Bucket,
   S3Object,
   SecurityGroup,
+  SesIdentity,
 } from './types';
 
 export const api = {
@@ -107,6 +108,14 @@ export const api = {
     }),
   revokeBucketIamUser: (profile: string, userName: string) =>
     invoke<void>('revoke_bucket_iam_user', { profile, userName }),
+
+  // Amazon SES
+  listSesIdentities: (profile: string) =>
+    invoke<SesIdentity[]>('list_ses_identities', { profile }),
+  createSesIdentity: (profile: string, identityName: string) =>
+    invoke<string>('create_ses_identity', { profile, identityName }),
+  deleteSesIdentity: (profile: string, identityName: string) =>
+    invoke<void>('delete_ses_identity', { profile, identityName }),
 
   // Native file dialogs
   pickUploadFile: async (): Promise<string | null> => {

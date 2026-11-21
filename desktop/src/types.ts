@@ -95,4 +95,13 @@ export interface BucketIamUser {
   accessKeys: IamAccessKeyMeta[];
 }
 
-export type NavSection = 'route53' | 'ec2' | 's3' | 'accounts';
+export interface SesIdentity {
+  identityName: string;
+  identityType: 'DOMAIN' | 'EMAIL_ADDRESS' | 'MANAGED_DOMAIN' | string;
+  typeLabel: string;
+  verificationStatus: string;
+  dkimStatus: string;
+  sendingEnabled: boolean;
+}
+
+export type NavSection = 'route53' | 'ec2' | 's3' | 'ses' | 'accounts';

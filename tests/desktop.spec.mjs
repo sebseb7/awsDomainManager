@@ -10,6 +10,7 @@ import {
   DUMMY_S3_OBJECTS,
   DUMMY_BUCKET_IAM_USERS,
   DUMMY_RECREATED_CREDENTIAL,
+  DUMMY_SES_IDENTITIES,
 } from './fixtures/dummyData.mjs';
 
 mkdirSync('docs', { recursive: true });
@@ -26,8 +27,10 @@ test.beforeEach(async ({ page }) => {
       objects,
       iamUsers,
       recreatedCred,
+      sesIdentities,
     }) => {
       let currentUsers = structuredClone(iamUsers);
+      let currentSes = structuredClone(sesIdentities);
 
       window.__TAURI_INTERNALS__ = {
         transformCallback: () => 0,
@@ -116,6 +119,24 @@ test.beforeEach(async ({ page }) => {
               currentUsers = currentUsers.filter((u) => u.userName !== args.userName);
               return null;
             }
+            case 'list_ses_identities':
+              return currentSes;
+            case 'create_ses_identity': {
+              const isEmail = args.identityName.includes('@');
+              currentSes.push({
+                identityName: args.identityName,
+                identityType: isEmail ? 'EMAIL_ADDRESS' : 'DOMAIN',
+                typeLabel: isEmail ? 'Email' : 'Domain',
+                verificationStatus: 'PENDING',
+                dkimStatus: 'PENDING',
+                sendingEnabled: false,
+              });
+              return args.identityName;
+            }
+            case 'delete_ses_identity': {
+              currentSes = currentSes.filter((i) => i.identityName !== args.identityName);
+              return null;
+            }
             default:
               return [];
           }
@@ -132,6 +153,7 @@ test.beforeEach(async ({ page }) => {
       objects: DUMMY_S3_OBJECTS,
       iamUsers: DUMMY_BUCKET_IAM_USERS,
       recreatedCred: DUMMY_RECREATED_CREDENTIAL,
+      sesIdentities: DUMMY_SES_IDENTITIES,
     }
   );
 });
@@ -180,10 +202,18 @@ test('Desktop App: Route53, EC2, S3 IAM Keys (multiple read / single write), QR 
   await page.getByRole('button', { name: 'Done' }).click();
   await page.getByRole('button', { name: 'Close' }).click();
 
-  // 5. AWS Accounts & IAM Permissions Guide
+  // 5. Amazon SES Identities (Domains & Email Addresses)
+  await page.getByRole('button', { name: /Amazon SES/i }).click();
+  await expect(page.getByText('Domains (3)')).toBeVisible();
+  await expect(page.getByText('Email Addresses (3)')).toBeVisible();
+  await expect(page.getByText('alerts@example.com')).toBeVisible();
+  await page.screenshot({ path: 'docs/desktop-ses.png' });
+
+  // 6. AWS Accounts & IAM Permissions Guide
   await page.getByRole('button', { name: /AWS Accounts/i }).click();
   await expect(page.getByText('prod-aws')).toBeVisible();
   await page.getByRole('button', { name: /Minimum IAM Permissions/i }).click();
   await expect(page.getByText('IAMManageBucketUsersOnly')).toBeVisible();
+  await expect(page.getByText('SESManageIdentities')).toBeVisible();
   await page.screenshot({ path: 'docs/desktop-accounts.png' });
 });
