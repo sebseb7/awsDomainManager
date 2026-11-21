@@ -3,6 +3,10 @@
 [![CI Build](https://github.com/sebseb7/awsDomainManager/actions/workflows/ci.yml/badge.svg)](https://github.com/sebseb7/awsDomainManager/actions/workflows/ci.yml)
 [![Release Desktop App](https://github.com/sebseb7/awsDomainManager/actions/workflows/release.yml/badge.svg)](https://github.com/sebseb7/awsDomainManager/actions/workflows/release.yml)
 
+**Download Desktop App (v1.2.0):**
+- **macOS (Apple Silicon `.dmg`):** [AWS Domain Manager_1.2.0_aarch64.dmg](https://github.com/sebseb7/awsDomainManager/releases/download/v3/AWS.Domain.Manager_1.2.0_aarch64.dmg)
+- **Windows (x64 `.exe`):** [AWS Domain Manager_1.2.0_x64-setup.exe](https://github.com/sebseb7/awsDomainManager/releases/download/v3/AWS.Domain.Manager_1.2.0_x64-setup.exe)
+
 A terminal-based and native desktop UI tool for managing AWS Route53, EC2 Security Groups, S3 Buckets (with scoped IAM key management), Amazon SES Identities (domains & email addresses), and AWS credential profiles across multiple accounts.
 
 ## Screenshots
@@ -37,7 +41,7 @@ A terminal-based and native desktop UI tool for managing AWS Route53, EC2 Securi
 
 ### Desktop App (Tauri v2)
 
-Download the pre-built macOS (`.dmg` / `.app.zip`) or Windows (`.exe`) installer from [GitHub Releases](https://github.com/sebseb7/awsDomainManager/releases), or run locally from source:
+Download the pre-built macOS (`.dmg`) or Windows (`.exe`) installer from [GitHub Releases](https://github.com/sebseb7/awsDomainManager/releases), or run locally from source:
 
 ```bash
 cd desktop && npm install && npm run tauri dev

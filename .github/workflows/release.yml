@@ -77,7 +77,7 @@ jobs:
       matrix:
         include:
           - platform: macos-latest
-            bundles: app,dmg
+            bundles: dmg
           - platform: windows-latest
             bundles: nsis
 
@@ -159,7 +159,7 @@ jobs:
             Native desktop application for managing AWS Route53 DNS records, EC2 Security Group inbound rules, S3 buckets & objects (with scoped IAM user creation, key revoke/recreate, multiple read keys & single write key, and QR code export), Amazon SES identities (domains & email addresses), and AWS credential profiles.
 
             ### Downloads
-            - **macOS (Apple Silicon):** `.dmg` disk image or `.app.zip` application bundle
+            - **macOS (Apple Silicon):** `.dmg` disk image
             - **Windows (x64):** `.exe` NSIS installer
           releaseDraft: false
           prerelease: false
@@ -169,15 +169,3 @@ jobs:
         if: always()
         shell: bash
         run: sccache --show-stats
-
-      - name: Package and upload macOS .app bundle
-        if: matrix.platform == 'macos-latest'
-        shell: bash
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          APP_PATH=$(find desktop/src-tauri/target/release/bundle/macos -maxdepth 1 -name "*.app" | head -n 1)
-          if [ -n "$APP_PATH" ]; then
-            ditto -c -k --sequesterRsrc --keepParent "$APP_PATH" "AWS-Domain-Manager-macos-aarch64.app.zip"
-            gh release upload "${{ github.ref_name }}" "AWS-Domain-Manager-macos-aarch64.app.zip" --clobber
-          fi
