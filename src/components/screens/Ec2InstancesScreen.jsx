@@ -123,6 +123,45 @@ const InstanceDetailsModal = ({ instance, onClose }) => {
   );
 };
 
+const ReverseDnsForm = ({ eip, ptrInput, setPtrInput, onSubmit, onCancel }) => {
+  useInput((input, key) => {
+    if (key.escape) {
+      onCancel?.();
+    }
+  });
+
+  return (
+    <Box flexDirection="column" borderStyle="round" borderColor="cyan" padding={1}>
+      <Text bold color="cyan">
+        Reverse DNS (PTR) — {eip.publicIp} ({eip.allocationId})
+      </Text>
+      {eip.ptrRecord && (
+        <Box marginTop={1}>
+          <Text>
+            Current PTR: <Text color="blue" bold>{eip.ptrRecord}</Text>
+          </Text>
+        </Box>
+      )}
+      <Box marginTop={1}>
+        <Box flexShrink={0}>
+          <Text color="cyan">PTR Domain (empty to clear): </Text>
+        </Box>
+        <TextInput
+          value={ptrInput}
+          placeholder="mail.example.com"
+          focus={true}
+          showCursor
+          onChange={setPtrInput}
+          onSubmit={onSubmit}
+        />
+      </Box>
+      <Box marginTop={1}>
+        <Text dimColor>Press Enter to save (or clear if blank), or Esc to cancel</Text>
+      </Box>
+    </Box>
+  );
+};
+
 const Ec2InstancesScreen = ({
   selectedAccount,
   ec2Instances = [],
@@ -141,6 +180,11 @@ const Ec2InstancesScreen = ({
   associateInstanceIdx,
   setAssociateInstanceIdx,
   submitAssociateEip,
+  showPtrEipModal,
+  setShowPtrEipModal,
+  eipPtrInput,
+  setEipPtrInput,
+  submitEditEipPtr,
   ec2ConfirmAction,
   statusMessage,
 }) => {
@@ -160,6 +204,7 @@ const Ec2InstancesScreen = ({
     showEc2DetailsModal ||
     showAllocateEipModal ||
     showAssociateEipModal ||
+    showPtrEipModal ||
     Boolean(ec2ConfirmAction);
 
   return (
@@ -211,6 +256,14 @@ const Ec2InstancesScreen = ({
           setSelectedIdx={setAssociateInstanceIdx}
           onConfirm={submitAssociateEip}
           onCancel={() => setShowAssociateEipModal(false)}
+        />
+      ) : showPtrEipModal && highlightedEip ? (
+        <ReverseDnsForm
+          eip={highlightedEip}
+          ptrInput={eipPtrInput}
+          setPtrInput={setEipPtrInput}
+          onSubmit={submitEditEipPtr}
+          onCancel={() => setShowPtrEipModal(false)}
         />
       ) : ec2ConfirmAction ? (
         <Box flexDirection="column" borderStyle="round" borderColor="yellow" padding={1}>
@@ -315,12 +368,12 @@ const Ec2InstancesScreen = ({
           ) : (
             <Box flexDirection="column">
               <Box>
-                <Text bold>{'  '}{'Public IP'.padEnd(16)}</Text>
+                <Text bold>{'  '}{'Public IP'.padEnd(15)}</Text>
                 <Text bold>{'Name'.padEnd(20)}</Text>
-                <Text bold>{'Allocation ID'.padEnd(28)}</Text>
-                <Text bold>{'Status'.padEnd(14)}</Text>
-                <Text bold>{'Attached Instance / ENI'.padEnd(34)}</Text>
-                <Text bold>Private IP</Text>
+                <Text bold>{'Allocation ID'.padEnd(27)}</Text>
+                <Text bold>{'Status'.padEnd(13)}</Text>
+                <Text bold>{'Attached / Private IP'.padEnd(25)}</Text>
+                <Text bold>Reverse DNS (PTR)</Text>
               </Box>
               {elasticIps.map((eip, idx) => {
                 const globalIdx = ec2Instances.length + idx;
@@ -335,29 +388,35 @@ const Ec2InstancesScreen = ({
                     : 'yellow';
                 const attachedDisplay = eip.instanceId
                   ? eip.instanceName
-                    ? `${eip.instanceName} (${eip.instanceId})`
-                    : eip.instanceId
+                    ? `${eip.instanceName} (${eip.privateIp})`
+                    : `${eip.instanceId} (${eip.privateIp})`
                   : eip.networkInterfaceId !== '-'
                     ? eip.networkInterfaceId
                     : '— (Idle)';
+                const ptrDisplay = eip.ptrRecord || '-';
 
                 return (
                   <Box key={eip.allocationId}>
                     <Text color={rowColor} bold={isSelected}>
                       {isSelected ? '▸ ' : '  '}
-                      {eip.publicIp.padEnd(16)}
+                      {eip.publicIp.padEnd(15)}
                     </Text>
                     <Text color={rowColor}>
                       {(eip.name !== '-' ? eip.name : '(unnamed)').slice(0, 18).padEnd(20)}
                     </Text>
-                    <Text color={rowColor}>{eip.allocationId.padEnd(28)}</Text>
+                    <Text color={rowColor}>{eip.allocationId.padEnd(27)}</Text>
                     <Text color={statusColor} bold={isSelected}>
-                      {statusText.padEnd(14)}
+                      {statusText.padEnd(13)}
                     </Text>
                     <Text color={rowColor}>
-                      {attachedDisplay.slice(0, 32).padEnd(34)}
+                      {attachedDisplay.slice(0, 24).padEnd(25)}
                     </Text>
-                    <Text color={rowColor}>{eip.privateIp}</Text>
+                    <Text
+                      color={isSelected ? 'cyan' : eip.ptrRecord ? 'blue' : undefined}
+                      dimColor={!isSelected && !eip.ptrRecord}
+                    >
+                      {ptrDisplay}
+                    </Text>
                   </Box>
                 );
               })}
@@ -369,7 +428,7 @@ const Ec2InstancesScreen = ({
       {!isModalOpen && !loading && (
         <Box marginTop={1}>
           <Text dimColor>
-            ↑/↓/Tab select | l lock/unlock | r reboot | s start/stop | v/Enter details | n allocate EIP | a associate EIP | u disassociate EIP | d release EIP | Esc
+            ↑/↓/Tab select | l lock/unlock | r reboot | s start/stop | v/Enter details | n allocate EIP | a associate | p reverse DNS | u detach | d release | Esc
           </Text>
         </Box>
       )}

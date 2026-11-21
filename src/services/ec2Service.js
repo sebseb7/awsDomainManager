@@ -6,6 +6,9 @@ import {
   RevokeSecurityGroupIngressCommand,
   DescribeInstancesCommand,
   DescribeAddressesCommand,
+  DescribeAddressesAttributeCommand,
+  ModifyAddressAttributeCommand,
+  ResetAddressAttributeCommand,
   RebootInstancesCommand,
   StartInstancesCommand,
   StopInstancesCommand,
@@ -304,8 +307,37 @@ export const loadEc2Instances = async (account) => {
   }
 };
 
+const fetchPtrRecordsMap = async (client, allocationIds) => {
+  const map = new Map();
+  if (!allocationIds || allocationIds.length === 0) return map;
+  let nextToken;
+  try {
+    do {
+      const resp = await client.send(
+        new DescribeAddressesAttributeCommand({
+          AllocationIds: allocationIds,
+          Attribute: 'domain-name',
+          NextToken: nextToken,
+        })
+      );
+      for (const attr of resp.Addresses || []) {
+        if (attr.AllocationId) {
+          map.set(attr.AllocationId, {
+            ptrRecord: attr.PtrRecord?.trim() || null,
+            ptrUpdateStatus: attr.PtrRecordUpdate?.Status || null,
+          });
+        }
+      }
+      nextToken = resp.NextToken;
+    } while (nextToken);
+  } catch {
+    // Gracefully degrade if DescribeAddressesAttribute is not permitted
+  }
+  return map;
+};
+
 /**
- * Load all Elastic IPs for an account
+ * Load all Elastic IPs for an account (including Reverse DNS / PTR records)
  * @param {Object} account - The AWS account object
  * @returns {Promise<Array>} Array of formatted Elastic IPs
  */
@@ -331,10 +363,15 @@ export const loadElasticIps = async (account) => {
       // Ignore if DescribeInstances fails
     }
 
+    const allocIds = (addrResp.Addresses || []).map((a) => a.AllocationId).filter(Boolean);
+    const ptrMap = await fetchPtrRecordsMap(client, allocIds);
+
     const eips = (addrResp.Addresses || []).map((addr) => {
+      const allocationId = addr.AllocationId || '-';
       const instanceId = addr.InstanceId || null;
+      const ptrInfo = ptrMap.get(allocationId) || { ptrRecord: null, ptrUpdateStatus: null };
       return {
-        allocationId: addr.AllocationId || '-',
+        allocationId,
         publicIp: addr.PublicIp || '-',
         name: findTagValue(addr.Tags || [], 'Name') || '-',
         associationId: addr.AssociationId || null,
@@ -345,6 +382,8 @@ export const loadElasticIps = async (account) => {
         domain: addr.Domain || 'vpc',
         publicIpv4Pool: addr.PublicIpv4Pool || 'amazon',
         networkBorderGroup: addr.NetworkBorderGroup || account.region || '-',
+        ptrRecord: ptrInfo.ptrRecord,
+        ptrUpdateStatus: ptrInfo.ptrUpdateStatus,
       };
     });
 
@@ -501,15 +540,114 @@ export const disassociateElasticIp = async (account, associationId) => {
   }
 };
 
-/**
- * Release an unassociated Elastic IP
- */
-export const releaseElasticIp = async (account, allocationId) => {
+export const resetElasticIpReverseDns = async (account, allocationId) => {
+  const trimmed = (allocationId || '').trim();
+  if (!trimmed) throw new Error('Elastic IP allocation ID is required.');
   try {
     const client = createEC2Client(account);
-    await client.send(new ReleaseAddressCommand({ AllocationId: allocationId }));
-    return `Released Elastic IP ${allocationId}.`;
+    await client.send(
+      new ResetAddressAttributeCommand({
+        AllocationId: trimmed,
+        Attribute: 'domain-name',
+      })
+    );
+    return `Cleared Reverse DNS (PTR) record for ${trimmed}.`;
   } catch (err) {
-    throw new Error('Failed to release Elastic IP: ' + err.message);
+    throw new Error(`Failed to clear Reverse DNS for ${trimmed}: ${err.message}`);
+  }
+};
+
+export const updateElasticIpReverseDns = async (account, allocationId, domainName) => {
+  const trimmedAlloc = (allocationId || '').trim();
+  if (!trimmedAlloc) throw new Error('Elastic IP allocation ID is required.');
+  const trimmedDomain = (domainName || '').trim();
+  if (!trimmedDomain) {
+    return resetElasticIpReverseDns(account, trimmedAlloc);
+  }
+  try {
+    const client = createEC2Client(account);
+    await client.send(
+      new ModifyAddressAttributeCommand({
+        AllocationId: trimmedAlloc,
+        DomainName: trimmedDomain,
+      })
+    );
+    return `Updated Reverse DNS (PTR) for ${trimmedAlloc} to "${trimmedDomain}".`;
+  } catch (err) {
+    throw new Error(`Failed to update Reverse DNS for ${trimmedAlloc}: ${err.message}`);
+  }
+};
+
+const looksLikeReverseDnsBlock = (msg) => {
+  const lower = String(msg || '').toLowerCase();
+  return (
+    lower.includes('reverse dns') ||
+    lower.includes('ptr') ||
+    lower.includes('domain-name') ||
+    lower.includes('domain name')
+  );
+};
+
+/**
+ * Release an unassociated Elastic IP, automatically clearing any Reverse DNS (PTR) record first.
+ */
+export const releaseElasticIp = async (account, allocationId) => {
+  const trimmed = (allocationId || '').trim();
+  if (!trimmed) throw new Error('Elastic IP allocation ID is required.');
+
+  const client = createEC2Client(account);
+  let clearedPtr = false;
+  const ptrMap = await fetchPtrRecordsMap(client, [trimmed]);
+  const detectedPtr = ptrMap.get(trimmed)?.ptrRecord || null;
+
+  if (detectedPtr) {
+    try {
+      await client.send(
+        new ResetAddressAttributeCommand({
+          AllocationId: trimmed,
+          Attribute: 'domain-name',
+        })
+      );
+      clearedPtr = true;
+    } catch (err) {
+      throw new Error(
+        `Failed to clear Reverse DNS record (${detectedPtr}) before releasing ${trimmed}: ${err.message}`
+      );
+    }
+  }
+
+  try {
+    await client.send(new ReleaseAddressCommand({ AllocationId: trimmed }));
+    return detectedPtr
+      ? `Cleared Reverse DNS (${detectedPtr}) and released Elastic IP ${trimmed}.`
+      : `Released Elastic IP ${trimmed}.`;
+  } catch (firstErr) {
+    if (clearedPtr || looksLikeReverseDnsBlock(firstErr.message)) {
+      if (!clearedPtr) {
+        try {
+          await client.send(
+            new ResetAddressAttributeCommand({
+              AllocationId: trimmed,
+              Attribute: 'domain-name',
+            })
+          );
+        } catch (resetErr) {
+          throw new Error(
+            `Elastic IP ${trimmed} has a Reverse DNS record and clearing it failed: ${resetErr.message}`
+          );
+        }
+      }
+
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+      try {
+        await client.send(new ReleaseAddressCommand({ AllocationId: trimmed }));
+        return `Cleared Reverse DNS and released Elastic IP ${trimmed}.`;
+      } catch (retryErr) {
+        throw new Error(
+          `Cleared Reverse DNS for ${trimmed}, but releasing Elastic IP still failed: ${retryErr.message}`
+        );
+      }
+    }
+    throw new Error(`Failed to release Elastic IP ${trimmed}: ${firstErr.message}`);
   }
 };

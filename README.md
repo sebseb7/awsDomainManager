@@ -3,9 +3,9 @@
 [![CI Build](https://github.com/sebseb7/awsDomainManager/actions/workflows/ci.yml/badge.svg)](https://github.com/sebseb7/awsDomainManager/actions/workflows/ci.yml)
 [![Release Desktop App](https://github.com/sebseb7/awsDomainManager/actions/workflows/release.yml/badge.svg)](https://github.com/sebseb7/awsDomainManager/actions/workflows/release.yml)
 
-**Download Desktop App (v2.4.0):**
-- **macOS (Apple Silicon `.dmg`):** [AWS Domain Manager_2.4.0_aarch64.dmg](https://github.com/sebseb7/awsDomainManager/releases/download/v2.4.0/AWS.Domain.Manager_2.4.0_aarch64.dmg)
-- **Windows (x64 `.exe`):** [AWS Domain Manager_2.4.0_x64-setup.exe](https://github.com/sebseb7/awsDomainManager/releases/download/v2.4.0/AWS.Domain.Manager_2.4.0_x64-setup.exe)
+**Download Desktop App (v2.4.1):**
+- **macOS (Apple Silicon `.dmg`):** [AWS Domain Manager_2.4.1_aarch64.dmg](https://github.com/sebseb7/awsDomainManager/releases/download/v2.4.1/AWS.Domain.Manager_2.4.1_aarch64.dmg)
+- **Windows (x64 `.exe`):** [AWS Domain Manager_2.4.1_x64-setup.exe](https://github.com/sebseb7/awsDomainManager/releases/download/v2.4.1/AWS.Domain.Manager_2.4.1_x64-setup.exe)
 
 A terminal-based and native desktop UI tool for managing AWS Route53, EC2 Instances & Elastic IPs (with Reboot Lock protection), EC2 Security Groups, S3 Buckets (with scoped IAM key management), Amazon SES Identities (domains & email addresses), and AWS credential profiles across multiple accounts.
 
@@ -67,7 +67,7 @@ npm i . && npm run build && npm run start
 - **EC2 Instances & Elastic IPs** — View and manage EC2 instances and Elastic IPv4 addresses in one place:
   - **EC2 Instances**: Inspect instance state (`running`, `stopped`, etc.), instance type & architecture (`x86_64` / `arm64`), availability zone, public IPv4 (with an `EIP` badge when backed by an Elastic IP), private IPv4, IPv6, VPC/subnet, SSH key pair, attached security groups, and launch timestamp
   - **Reboot, Start/Stop & Reboot Lock**: Reboot, start, or stop instances with persistent **Reboot Lock** protection (stored as the `RebootLock=true` EC2 tag so locked production instances cannot be accidentally rebooted or stopped across Desktop or TUI)
-  - **Elastic IPs (EIPs)**: List all allocated VPC Elastic IPs with Name tag, Allocation ID, status (`ASSOCIATED` vs `UNASSOCIATED`/idle), attached EC2 instance name & ID (or ENI), private IP, association ID, and network border group/pool; allocate new Elastic IPs, associate/reassociate them with instances, disassociate, or release idle addresses
+  - **Elastic IPs (EIPs) & Reverse DNS (PTR)**: List all allocated VPC Elastic IPs with Name tag, Allocation ID, status (`ASSOCIATED` vs `UNASSOCIATED`/idle), attached EC2 instance name & ID (or ENI), private IP, association ID, Reverse DNS (`PTR`) record, and network border group/pool; allocate new Elastic IPs, associate/reassociate them with instances, update or clear Reverse DNS (`PTR`) records, disassociate, or release idle addresses (automatically clearing Reverse DNS first so AWS does not block `ReleaseAddress`)
 - **EC2 Security Groups** — View, add, and delete inbound rules for security groups
 - **S3 Buckets** — List, create (with optional scoped Put-Only and/or Read-Only IAM user creation — never delete — plus a scannable QR code of bucket & credentials), and delete S3 buckets; manage per-bucket IAM keys (revoke/recreate read & write keys, multiple read keys allowed, max 1 write key per bucket); and browse prefixes/folders to upload, download, or delete objects
 - **Amazon SES Identities & SMTP** — List, filter, add, and delete domain and email address identities with verification, DKIM, DMARC, inbound MX, and sending status:
@@ -90,7 +90,7 @@ Resource Selection
   ├── EC2 Instances & Elastic IPs
   │     ├── Select account
   │     ├── View/manage EC2 instances (l lock/unlock reboot, r reboot, s start/stop, v/Enter details)
-  │     └── View/manage Elastic IPs (n allocate, a associate, u disassociate, d release)
+  │     └── View/manage Elastic IPs (n allocate, a associate, p reverse DNS, u disassociate, d release)
   │
   ├── EC2 Security Groups
   │     ├── Select account
@@ -128,7 +128,7 @@ Resource Selection
 | `l` | — | Toggle Reboot Lock | — | — | — | — | — |
 | `m` | Add MX record | — | — | — | Publish inbound MX (domains) | — | — |
 | `n` | Add NS record | Allocate new Elastic IP | — | Add read key (S3 keys) | — | Add sender key | — |
-| `p` | — | — | — | — | Publish DKIM/DMARC to R53 | — | — |
+| `p` | — | Update/clear Reverse DNS (PTR) | — | — | Publish DKIM/DMARC to R53 | — | — |
 | `r` | — | Reboot instance (if unlocked) | — | Recreate key (S3 keys) | Resend verification email | Recreate SMTP key | — |
 | `s` | — | Start / stop instance | — | — | — | — | — |
 | `t` | Add TXT record | — | — | — | — | Open SMTP send tester | — |
@@ -145,7 +145,7 @@ Resource Selection
 
 ## Minimum IAM Permissions (Least Privilege)
 
-Create a dedicated IAM user for this tool instead of using root or `AdministratorAccess` credentials. The optimized policy below fits under AWS's **2,048-character** inline user policy limit (~1,354 non-whitespace characters; ~1,972 total characters) — omit any actions or statements for services you do not use (or customize interactively in the Desktop App's **AWS Accounts** view):
+Create a dedicated IAM user for this tool instead of using root or `AdministratorAccess` credentials. The optimized policy below fits under AWS's **2,048-character** inline user policy limit (~1,379 non-whitespace characters; ~2,006 total characters) — omit any actions or statements for services you do not use (or customize interactively in the Desktop App's **AWS Accounts** view):
 
 ```json
 {
@@ -167,6 +167,7 @@ Create a dedicated IAM user for this tool instead of using root or `Administrato
         "ec2:AssociateAddress",
         "ec2:DisassociateAddress",
         "ec2:ReleaseAddress",
+        "ec2:*Address*Attribute",
         "ec2:DescribeSecurityGroups",
         "ec2:DescribeSecurityGroupRules",
         "ec2:AuthorizeSecurityGroupIngress",

@@ -37,6 +37,7 @@ export const useKeyboardNavigation = (navigationState, navigationActions) => {
     handleViewEc2Details,
     handleAllocateEip,
     handleAssociateEip,
+    handleEditEipPtr,
     handleDisassociateEip,
     handleReleaseEip,
     handleTabEc2Section,
@@ -170,6 +171,10 @@ export const useKeyboardNavigation = (navigationState, navigationActions) => {
       }
       if (input === 'a' && records.length > 0) {
         handleAssociateEip?.();
+        return;
+      }
+      if (input === 'p' && records.length > 0) {
+        handleEditEipPtr?.();
         return;
       }
       if (input === 'u' && records.length > 0) {

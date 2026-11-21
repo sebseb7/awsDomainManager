@@ -28,7 +28,11 @@ export const IamPermissionsGuide: React.FC<Props> = ({ defaultExpanded = false }
     if (includeEc2Instances) {
       wildcardActions.push(
         ...(readOnly
-          ? ['ec2:DescribeInstances', 'ec2:DescribeAddresses']
+          ? [
+              'ec2:DescribeInstances',
+              'ec2:DescribeAddresses',
+              'ec2:DescribeAddressesAttribute',
+            ]
           : [
               'ec2:DescribeInstances',
               'ec2:DescribeAddresses',
@@ -41,6 +45,7 @@ export const IamPermissionsGuide: React.FC<Props> = ({ defaultExpanded = false }
               'ec2:AssociateAddress',
               'ec2:DisassociateAddress',
               'ec2:ReleaseAddress',
+              'ec2:*Address*Attribute',
             ])
       );
     }

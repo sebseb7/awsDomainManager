@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import {
+  AlertTriangle,
   Cpu,
   Globe,
   Info,
@@ -40,6 +41,8 @@ export const Ec2InstancesView: React.FC<Props> = ({ account, onError, onSuccess 
   const [associateInstanceId, setAssociateInstanceId] = useState('');
   const [disassociateTarget, setDisassociateTarget] = useState<ElasticIp | null>(null);
   const [releaseTarget, setReleaseTarget] = useState<ElasticIp | null>(null);
+  const [ptrTarget, setPtrTarget] = useState<ElasticIp | null>(null);
+  const [ptrInput, setPtrInput] = useState('');
 
   const loadAll = async () => {
     setLoading(true);
@@ -65,6 +68,8 @@ export const Ec2InstancesView: React.FC<Props> = ({ account, onError, onSuccess 
     setAssociateTarget(null);
     setDisassociateTarget(null);
     setReleaseTarget(null);
+    setPtrTarget(null);
+    setPtrInput('');
     loadAll();
   }, [account.profile]);
 
@@ -205,6 +210,47 @@ export const Ec2InstancesView: React.FC<Props> = ({ account, onError, onSuccess 
     }
   };
 
+  const openPtrModal = (eip: ElasticIp) => {
+    setPtrTarget(eip);
+    setPtrInput(eip.ptrRecord ? eip.ptrRecord.replace(/\.$/, '') : '');
+  };
+
+  const handleSavePtr = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!ptrTarget) return;
+    setLoading(true);
+    try {
+      const trimmed = ptrInput.trim();
+      const msg = trimmed
+        ? await api.updateElasticIpReverseDns(account.profile, ptrTarget.allocationId, trimmed)
+        : await api.resetElasticIpReverseDns(account.profile, ptrTarget.allocationId);
+      setPtrTarget(null);
+      setPtrInput('');
+      onSuccess(msg);
+      await loadAll();
+    } catch (err) {
+      onError(String(err));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleClearPtr = async () => {
+    if (!ptrTarget) return;
+    setLoading(true);
+    try {
+      const msg = await api.resetElasticIpReverseDns(account.profile, ptrTarget.allocationId);
+      setPtrTarget(null);
+      setPtrInput('');
+      onSuccess(msg);
+      await loadAll();
+    } catch (err) {
+      onError(String(err));
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const q = search.trim().toLowerCase();
   const filteredInstances = instances.filter(
     (i) =>
@@ -226,6 +272,7 @@ export const Ec2InstancesView: React.FC<Props> = ({ account, onError, onSuccess 
       eip.name.toLowerCase().includes(q) ||
       (eip.instanceId || '').toLowerCase().includes(q) ||
       (eip.instanceName || '').toLowerCase().includes(q) ||
+      (eip.ptrRecord || '').toLowerCase().includes(q) ||
       eip.privateIp.toLowerCase().includes(q)
   );
 
@@ -503,11 +550,11 @@ export const Ec2InstancesView: React.FC<Props> = ({ account, onError, onSuccess 
             <table className="ses-table">
               <thead>
                 <tr>
-                  <th>Public IP &amp; Name</th>
-                  <th>Allocation &amp; Assoc ID</th>
+                  <th>Public IP</th>
+                  <th>Allocation ID</th>
                   <th>Status</th>
-                  <th>Attached Instance &amp; Private IP</th>
-                  <th>Scope &amp; Pool</th>
+                  <th>Attached Instance</th>
+                  <th>Reverse DNS (PTR)</th>
                   <th>Actions</th>
                 </tr>
               </thead>
@@ -525,11 +572,11 @@ export const Ec2InstancesView: React.FC<Props> = ({ account, onError, onSuccess 
                         </div>
                       </td>
                       <td style={{ whiteSpace: 'nowrap', padding: '8px 5px' }}>
-                        <div className="mono" style={{ lineHeight: 1.25, fontSize: 11.5 }}>
+                        <div className="mono" style={{ lineHeight: 1.25, fontSize: 11 }}>
                           {eip.allocationId}
                         </div>
                         {eip.associationId && (
-                          <div className="mono" style={{ color: 'var(--text-muted)', fontSize: 10.5 }}>
+                          <div className="mono" style={{ color: 'var(--text-muted)', fontSize: 10 }}>
                             {eip.associationId}
                           </div>
                         )}
@@ -543,29 +590,53 @@ export const Ec2InstancesView: React.FC<Props> = ({ account, onError, onSuccess 
                       </td>
                       <td style={{ whiteSpace: 'nowrap', padding: '8px 5px' }}>
                         {eip.instanceId ? (
-                          <div>
+                          <div title={`${eip.instanceId} · ${eip.privateIp}`}>
                             <div style={{ fontWeight: 600, lineHeight: 1.25 }}>
                               {eip.instanceName || eip.instanceId}
                             </div>
                             <div className="mono" style={{ color: 'var(--text-muted)', fontSize: 11 }}>
-                              {eip.instanceId} · {eip.privateIp}
+                              {eip.privateIp}
                             </div>
                           </div>
                         ) : eip.networkInterfaceId !== '-' ? (
                           <div>
-                            <div className="mono">{eip.networkInterfaceId}</div>
+                            <div className="mono" style={{ fontSize: 11 }}>{eip.networkInterfaceId}</div>
                             <div className="mono" style={{ color: 'var(--text-muted)', fontSize: 11 }}>
                               {eip.privateIp}
                             </div>
                           </div>
                         ) : (
-                          <span style={{ color: 'var(--text-muted)' }}>— (Not attached)</span>
+                          <span style={{ color: 'var(--text-muted)' }}>— (Idle)</span>
                         )}
                       </td>
                       <td style={{ whiteSpace: 'nowrap', padding: '8px 5px' }}>
-                        <div style={{ lineHeight: 1.25, fontSize: 12 }}>{eip.networkBorderGroup}</div>
+                        {eip.ptrRecord ? (
+                          <div
+                            className="mono"
+                            style={{
+                              lineHeight: 1.25,
+                              fontSize: 11.5,
+                              color: 'var(--blue)',
+                              fontWeight: 600,
+                            }}
+                            title={
+                              eip.ptrUpdateStatus
+                                ? `Reverse DNS (PTR) — Status: ${eip.ptrUpdateStatus}`
+                                : 'Reverse DNS (PTR) record'
+                            }
+                          >
+                            {eip.ptrRecord}
+                          </div>
+                        ) : (
+                          <div style={{ lineHeight: 1.25, fontSize: 11.5, color: 'var(--text-muted)' }}>
+                            —
+                          </div>
+                        )}
                         <div style={{ color: 'var(--text-muted)', fontSize: 11 }}>
-                          {eip.domain} · {eip.publicIpv4Pool}
+                          {eip.networkBorderGroup} · {eip.domain}
+                          {eip.ptrUpdateStatus && eip.ptrUpdateStatus !== 'complete'
+                            ? ` · ${eip.ptrUpdateStatus}`
+                            : ''}
                         </div>
                       </td>
                       <td style={{ whiteSpace: 'nowrap', padding: '8px 10px 8px 5px' }}>
@@ -583,6 +654,19 @@ export const Ec2InstancesView: React.FC<Props> = ({ account, onError, onSuccess 
                           >
                             <Link2 size={11} /> {isAssociated ? 'Reassociate' : 'Associate'}
                           </button>
+                          <button
+                            type="button"
+                            className="btn btn-sm"
+                            onClick={() => openPtrModal(eip)}
+                            disabled={loading}
+                            title={
+                              eip.ptrRecord
+                                ? `Update or clear Reverse DNS (${eip.ptrRecord})`
+                                : 'Configure Reverse DNS (PTR) record'
+                            }
+                          >
+                            <Globe size={11} /> PTR
+                          </button>
                           {isAssociated ? (
                             <button
                               type="button"
@@ -599,7 +683,11 @@ export const Ec2InstancesView: React.FC<Props> = ({ account, onError, onSuccess 
                               className="btn btn-danger btn-sm"
                               onClick={() => setReleaseTarget(eip)}
                               disabled={loading}
-                              title="Release unassociated Elastic IP"
+                              title={
+                                eip.ptrRecord
+                                  ? `Release Elastic IP (will automatically clear Reverse DNS ${eip.ptrRecord} first)`
+                                  : 'Release unassociated Elastic IP'
+                              }
                             >
                               <Trash2 size={11} /> Release
                             </button>
@@ -887,16 +975,90 @@ export const Ec2InstancesView: React.FC<Props> = ({ account, onError, onSuccess 
                 <code className="mono">{releaseTarget.allocationId}</code>) back to Amazon&apos;s
                 IPv4 pool?
               </p>
+              {releaseTarget.ptrRecord && (
+                <div
+                  className="banner banner-warning"
+                  style={{ marginBottom: 0, alignItems: 'flex-start' }}
+                >
+                  <div className="ses-action-banner-body">
+                    <div className="ses-action-banner-title">
+                      <AlertTriangle size={14} /> Reverse DNS record will be cleared first
+                    </div>
+                    <div className="ses-action-banner-desc">
+                      AWS blocks releasing Elastic IPs with Reverse DNS (PTR) records (
+                      <code className="mono">{releaseTarget.ptrRecord}</code>). Confirming will
+                      automatically clear the PTR record via{' '}
+                      <code className="mono">ResetAddressAttribute</code> and then release this
+                      Elastic IP.
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
             <div className="modal-footer">
               <button className="btn" onClick={() => setReleaseTarget(null)}>
                 Cancel
               </button>
               <button className="btn btn-danger" onClick={handleConfirmRelease} disabled={loading}>
-                Release Elastic IP
+                {releaseTarget.ptrRecord ? 'Clear PTR & Release' : 'Release Elastic IP'}
               </button>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* Update Reverse DNS (PTR) Modal */}
+      {ptrTarget && (
+        <div className="modal-backdrop">
+          <form className="modal" onSubmit={handleSavePtr}>
+            <div className="modal-header">
+              <h3>Reverse DNS (PTR) — {ptrTarget.publicIp}</h3>
+            </div>
+            <div className="modal-body">
+              <div className="field">
+                <label>Reverse DNS Domain Name</label>
+                <input
+                  value={ptrInput}
+                  onChange={(e) => setPtrInput(e.target.value)}
+                  placeholder="mail.example.com"
+                  autoFocus
+                />
+              </div>
+              <p style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>
+                Sets or updates the PTR record for{' '}
+                <code className="mono">{ptrTarget.allocationId}</code> via{' '}
+                <code className="mono">ModifyAddressAttribute</code>. AWS requires a matching
+                forward DNS <code className="mono">A</code> record pointing to{' '}
+                <code className="mono">{ptrTarget.publicIp}</code>. Leave blank or click{' '}
+                <strong>Clear Reverse DNS</strong> to remove it.
+              </p>
+            </div>
+            <div className="modal-footer">
+              <button
+                type="button"
+                className="btn"
+                onClick={() => {
+                  setPtrTarget(null);
+                  setPtrInput('');
+                }}
+              >
+                Cancel
+              </button>
+              {ptrTarget.ptrRecord && (
+                <button
+                  type="button"
+                  className="btn btn-danger"
+                  onClick={handleClearPtr}
+                  disabled={loading}
+                >
+                  Clear Reverse DNS
+                </button>
+              )}
+              <button type="submit" className="btn btn-primary" disabled={loading}>
+                Save Reverse DNS
+              </button>
+            </div>
+          </form>
         </div>
       )}
     </div>

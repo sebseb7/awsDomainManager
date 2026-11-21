@@ -89,6 +89,8 @@ export interface ElasticIp {
   domain: string;
   publicIpv4Pool: string;
   networkBorderGroup: string;
+  ptrRecord?: string | null;
+  ptrUpdateStatus?: string | null;
 }
 
 export interface S3Bucket {

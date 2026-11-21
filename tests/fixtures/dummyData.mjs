@@ -154,6 +154,8 @@ export const DUMMY_ELASTIC_IPS = [
     domain: 'vpc',
     publicIpv4Pool: 'amazon',
     networkBorderGroup: 'eu-central-1',
+    ptrRecord: null,
+    ptrUpdateStatus: null,
   },
   {
     allocationId: 'eipalloc-0a1b2c3d4e5f60002',
@@ -167,6 +169,8 @@ export const DUMMY_ELASTIC_IPS = [
     domain: 'vpc',
     publicIpv4Pool: 'amazon',
     networkBorderGroup: 'eu-central-1',
+    ptrRecord: null,
+    ptrUpdateStatus: null,
   },
   {
     allocationId: 'eipalloc-0a1b2c3d4e5f60003',
@@ -180,6 +184,8 @@ export const DUMMY_ELASTIC_IPS = [
     domain: 'vpc',
     publicIpv4Pool: 'amazon',
     networkBorderGroup: 'eu-central-1',
+    ptrRecord: 'mail.example.com.',
+    ptrUpdateStatus: null,
   },
 ];
 

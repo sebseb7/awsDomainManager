@@ -73,6 +73,10 @@ export const api = {
     invoke<string>('disassociate_elastic_ip', { profile, associationId }),
   releaseElasticIp: (profile: string, allocationId: string) =>
     invoke<string>('release_elastic_ip', { profile, allocationId }),
+  updateElasticIpReverseDns: (profile: string, allocationId: string, domainName: string) =>
+    invoke<string>('update_elastic_ip_reverse_dns', { profile, allocationId, domainName }),
+  resetElasticIpReverseDns: (profile: string, allocationId: string) =>
+    invoke<string>('reset_elastic_ip_reverse_dns', { profile, allocationId }),
 
   // S3 & IAM
   listBuckets: (profile: string) => invoke<S3Bucket[]>('list_buckets', { profile }),

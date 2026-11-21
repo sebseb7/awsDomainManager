@@ -165,6 +165,23 @@ async fn release_elastic_ip(profile: String, allocation_id: String) -> Result<St
 }
 
 #[tauri::command]
+async fn update_elastic_ip_reverse_dns(
+    profile: String,
+    allocation_id: String,
+    domain_name: String,
+) -> Result<String, String> {
+    ec2::update_elastic_ip_reverse_dns(&profile, &allocation_id, &domain_name).await
+}
+
+#[tauri::command]
+async fn reset_elastic_ip_reverse_dns(
+    profile: String,
+    allocation_id: String,
+) -> Result<String, String> {
+    ec2::reset_elastic_ip_reverse_dns(&profile, &allocation_id).await
+}
+
+#[tauri::command]
 async fn list_buckets(profile: String) -> Result<Vec<BucketDto>, String> {
     s3::list_buckets(&profile).await
 }
@@ -369,6 +386,8 @@ pub fn run() {
             associate_elastic_ip,
             disassociate_elastic_ip,
             release_elastic_ip,
+            update_elastic_ip_reverse_dns,
+            reset_elastic_ip_reverse_dns,
             list_buckets,
             create_bucket,
             delete_bucket,

@@ -1,8 +1,18 @@
 use crate::aws_client::build_sdk_config;
-use aws_sdk_ec2::types::{DomainType, Filter, IpPermission, IpRange, Tag};
+use aws_sdk_ec2::error::{DisplayErrorContext, ProvideErrorMetadata};
+use aws_sdk_ec2::types::{AddressAttributeName, DomainType, Filter, IpPermission, IpRange, Tag};
 use aws_sdk_ec2::Client;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::time::Duration;
+
+fn format_aws_err<E: ProvideErrorMetadata + std::error::Error>(err: &E) -> String {
+    match (err.code(), err.message()) {
+        (Some(code), Some(msg)) => format!("{}: {}", code, msg),
+        (None, Some(msg)) => msg.to_string(),
+        _ => format!("{}", DisplayErrorContext(err)),
+    }
+}
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -74,6 +84,8 @@ pub struct ElasticIpDto {
     pub domain: String,
     pub public_ipv4_pool: String,
     pub network_border_group: String,
+    pub ptr_record: Option<String>,
+    pub ptr_update_status: Option<String>,
 }
 
 fn format_port_range(from_port: Option<i32>, to_port: Option<i32>) -> String {
@@ -106,7 +118,7 @@ pub async fn list_security_groups(profile: &str) -> Result<Vec<SecurityGroupDto>
         .describe_security_groups()
         .send()
         .await
-        .map_err(|e| format!("Failed to load security groups: {}", e))?;
+        .map_err(|e| format!("Failed to load security groups: {}", format_aws_err(&e)))?;
 
     let groups = resp
         .security_groups()
@@ -140,7 +152,7 @@ pub async fn list_inbound_rules(
         .max_results(1000)
         .send()
         .await
-        .map_err(|e| format!("Failed to load inbound rules: {}", e))?;
+        .map_err(|e| format!("Failed to load inbound rules: {}", format_aws_err(&e)))?;
 
     let rules = resp
         .security_group_rules()
@@ -214,7 +226,7 @@ pub async fn add_inbound_rule(
         .ip_permissions(perm_builder.build())
         .send()
         .await
-        .map_err(|e| format!("Failed to add inbound rule: {}", e))?;
+        .map_err(|e| format!("Failed to add inbound rule: {}", format_aws_err(&e)))?;
 
     Ok(())
 }
@@ -233,7 +245,7 @@ pub async fn delete_inbound_rule(
         .security_group_rule_ids(rule_id)
         .send()
         .await
-        .map_err(|e| format!("Failed to delete inbound rule: {}", e))?;
+        .map_err(|e| format!("Failed to delete inbound rule: {}", format_aws_err(&e)))?;
 
     Ok(())
 }
@@ -266,7 +278,7 @@ pub async fn list_ec2_instances(profile: &str) -> Result<Vec<Ec2InstanceDto>, St
         .describe_instances()
         .send()
         .await
-        .map_err(|e| format!("Failed to load EC2 instances: {}", e))?;
+        .map_err(|e| format!("Failed to load EC2 instances: {}", format_aws_err(&e)))?;
 
     // Map instance_id -> (public_ip, allocation_id) from Elastic IPs if permission allows
     let mut eip_by_instance: HashMap<String, (String, String)> = HashMap::new();
@@ -408,7 +420,13 @@ async fn ensure_instance_not_reboot_locked(
         .instance_ids(instance_id)
         .send()
         .await
-        .map_err(|e| format!("Failed to inspect instance {}: {}", instance_id, e))?;
+        .map_err(|e| {
+            format!(
+                "Failed to inspect instance {}: {}",
+                instance_id,
+                format_aws_err(&e)
+            )
+        })?;
 
     for res in resp.reservations() {
         for inst in res.instances() {
@@ -434,7 +452,13 @@ pub async fn reboot_ec2_instance(profile: &str, instance_id: &str) -> Result<Str
         .instance_ids(instance_id)
         .send()
         .await
-        .map_err(|e| format!("Failed to reboot instance {}: {}", instance_id, e))?;
+        .map_err(|e| {
+            format!(
+                "Failed to reboot instance {}: {}",
+                instance_id,
+                format_aws_err(&e)
+            )
+        })?;
 
     Ok(format!("Reboot initiated for EC2 instance {}.", instance_id))
 }
@@ -448,7 +472,13 @@ pub async fn start_ec2_instance(profile: &str, instance_id: &str) -> Result<Stri
         .instance_ids(instance_id)
         .send()
         .await
-        .map_err(|e| format!("Failed to start instance {}: {}", instance_id, e))?;
+        .map_err(|e| {
+            format!(
+                "Failed to start instance {}: {}",
+                instance_id,
+                format_aws_err(&e)
+            )
+        })?;
 
     Ok(format!("Start initiated for EC2 instance {}.", instance_id))
 }
@@ -464,7 +494,13 @@ pub async fn stop_ec2_instance(profile: &str, instance_id: &str) -> Result<Strin
         .instance_ids(instance_id)
         .send()
         .await
-        .map_err(|e| format!("Failed to stop instance {}: {}", instance_id, e))?;
+        .map_err(|e| {
+            format!(
+                "Failed to stop instance {}: {}",
+                instance_id,
+                format_aws_err(&e)
+            )
+        })?;
 
     Ok(format!("Stop initiated for EC2 instance {}.", instance_id))
 }
@@ -485,7 +521,13 @@ pub async fn set_ec2_reboot_lock(
             .tags(tag)
             .send()
             .await
-            .map_err(|e| format!("Failed to enable Reboot Lock on {}: {}", instance_id, e))?;
+            .map_err(|e| {
+                format!(
+                    "Failed to enable Reboot Lock on {}: {}",
+                    instance_id,
+                    format_aws_err(&e)
+                )
+            })?;
         Ok(format!(
             "Reboot Lock enabled for instance {} (Tag RebootLock=true).",
             instance_id
@@ -500,9 +542,65 @@ pub async fn set_ec2_reboot_lock(
             .tags(tag2)
             .send()
             .await
-            .map_err(|e| format!("Failed to disable Reboot Lock on {}: {}", instance_id, e))?;
+            .map_err(|e| {
+                format!(
+                    "Failed to disable Reboot Lock on {}: {}",
+                    instance_id,
+                    format_aws_err(&e)
+                )
+            })?;
         Ok(format!("Reboot Lock disabled for instance {}.", instance_id))
     }
+}
+
+async fn fetch_ptr_records_map(
+    client: &Client,
+    allocation_ids: &[String],
+) -> HashMap<String, (Option<String>, Option<String>)> {
+    let mut map = HashMap::new();
+    if allocation_ids.is_empty() {
+        return map;
+    }
+
+    let mut next_token: Option<String> = None;
+    loop {
+        let mut req = client
+            .describe_addresses_attribute()
+            .attribute(AddressAttributeName::DomainName)
+            .set_allocation_ids(Some(allocation_ids.to_vec()));
+        if let Some(token) = &next_token {
+            req = req.next_token(token);
+        }
+
+        match req.send().await {
+            Ok(resp) => {
+                for attr in resp.addresses() {
+                    if let Some(alloc_id) = attr.allocation_id() {
+                        let ptr = attr
+                            .ptr_record()
+                            .map(|s| s.trim().to_string())
+                            .filter(|s| !s.is_empty());
+                        let status = attr
+                            .ptr_record_update()
+                            .and_then(|u| u.status())
+                            .map(|s| s.to_string())
+                            .filter(|s| !s.is_empty());
+                        map.insert(alloc_id.to_string(), (ptr, status));
+                    }
+                }
+                next_token = resp.next_token().map(|s| s.to_string());
+                if next_token.is_none() {
+                    break;
+                }
+            }
+            Err(_) => {
+                // Gracefully degrade if ec2:DescribeAddressesAttribute is not permitted
+                break;
+            }
+        }
+    }
+
+    map
 }
 
 pub async fn list_elastic_ips(profile: &str) -> Result<Vec<ElasticIpDto>, String> {
@@ -513,7 +611,7 @@ pub async fn list_elastic_ips(profile: &str) -> Result<Vec<ElasticIpDto>, String
         .describe_addresses()
         .send()
         .await
-        .map_err(|e| format!("Failed to load Elastic IPs: {}", e))?;
+        .map_err(|e| format!("Failed to load Elastic IPs: {}", format_aws_err(&e)))?;
 
     let mut instance_names: HashMap<String, String> = HashMap::new();
     if let Ok(inst_resp) = client.describe_instances().send().await {
@@ -527,6 +625,13 @@ pub async fn list_elastic_ips(profile: &str) -> Result<Vec<ElasticIpDto>, String
             }
         }
     }
+
+    let alloc_ids: Vec<String> = addr_resp
+        .addresses()
+        .iter()
+        .filter_map(|a| a.allocation_id().map(|s| s.to_string()))
+        .collect();
+    let ptr_map = fetch_ptr_records_map(&client, &alloc_ids).await;
 
     let mut eips: Vec<ElasticIpDto> = addr_resp
         .addresses()
@@ -554,6 +659,10 @@ pub async fn list_elastic_ips(profile: &str) -> Result<Vec<ElasticIpDto>, String
                 .unwrap_or_else(|| "vpc".to_string());
             let public_ipv4_pool = addr.public_ipv4_pool().unwrap_or("amazon").to_string();
             let network_border_group = addr.network_border_group().unwrap_or("-").to_string();
+            let (ptr_record, ptr_update_status) = ptr_map
+                .get(&allocation_id)
+                .cloned()
+                .unwrap_or((None, None));
 
             ElasticIpDto {
                 allocation_id,
@@ -567,6 +676,8 @@ pub async fn list_elastic_ips(profile: &str) -> Result<Vec<ElasticIpDto>, String
                 domain,
                 public_ipv4_pool,
                 network_border_group,
+                ptr_record,
+                ptr_update_status,
             }
         })
         .collect();
@@ -588,7 +699,7 @@ pub async fn allocate_elastic_ip(
         .domain(DomainType::Vpc)
         .send()
         .await
-        .map_err(|e| format!("Failed to allocate Elastic IP: {}", e))?;
+        .map_err(|e| format!("Failed to allocate Elastic IP: {}", format_aws_err(&e)))?;
 
     let allocation_id = resp.allocation_id().unwrap_or_default().to_string();
     let public_ip = resp.public_ip().unwrap_or_default().to_string();
@@ -620,6 +731,8 @@ pub async fn allocate_elastic_ip(
         domain: "vpc".to_string(),
         public_ipv4_pool: resp.public_ipv4_pool().unwrap_or("amazon").to_string(),
         network_border_group: resp.network_border_group().unwrap_or("-").to_string(),
+        ptr_record: None,
+        ptr_update_status: None,
     })
 }
 
@@ -641,7 +754,9 @@ pub async fn associate_elastic_ip(
         .map_err(|e| {
             format!(
                 "Failed to associate Elastic IP {} with {}: {}",
-                allocation_id, instance_id, e
+                allocation_id,
+                instance_id,
+                format_aws_err(&e)
             )
         })?;
 
@@ -667,7 +782,8 @@ pub async fn disassociate_elastic_ip(
         .map_err(|e| {
             format!(
                 "Failed to disassociate Elastic IP ({}): {}",
-                association_id, e
+                association_id,
+                format_aws_err(&e)
             )
         })?;
 
@@ -677,16 +793,177 @@ pub async fn disassociate_elastic_ip(
     ))
 }
 
-pub async fn release_elastic_ip(profile: &str, allocation_id: &str) -> Result<String, String> {
+pub async fn update_elastic_ip_reverse_dns(
+    profile: &str,
+    allocation_id: &str,
+    domain_name: &str,
+) -> Result<String, String> {
+    let trimmed_alloc = allocation_id.trim();
+    if trimmed_alloc.is_empty() {
+        return Err("Elastic IP allocation ID is required.".to_string());
+    }
+    let trimmed_domain = domain_name.trim();
+    if trimmed_domain.is_empty() {
+        return reset_elastic_ip_reverse_dns(profile, trimmed_alloc).await;
+    }
+
     let config = build_sdk_config(profile, None).await?;
     let client = Client::new(&config);
 
     client
-        .release_address()
-        .allocation_id(allocation_id)
+        .modify_address_attribute()
+        .allocation_id(trimmed_alloc)
+        .domain_name(trimmed_domain)
         .send()
         .await
-        .map_err(|e| format!("Failed to release Elastic IP {}: {}", allocation_id, e))?;
+        .map_err(|e| {
+            format!(
+                "Failed to update Reverse DNS for {}: {}",
+                trimmed_alloc,
+                format_aws_err(&e)
+            )
+        })?;
 
-    Ok(format!("Released Elastic IP {}.", allocation_id))
+    Ok(format!(
+        "Updated Reverse DNS (PTR) for {} to \"{}\".",
+        trimmed_alloc, trimmed_domain
+    ))
+}
+
+pub async fn reset_elastic_ip_reverse_dns(
+    profile: &str,
+    allocation_id: &str,
+) -> Result<String, String> {
+    let trimmed_alloc = allocation_id.trim();
+    if trimmed_alloc.is_empty() {
+        return Err("Elastic IP allocation ID is required.".to_string());
+    }
+
+    let config = build_sdk_config(profile, None).await?;
+    let client = Client::new(&config);
+
+    client
+        .reset_address_attribute()
+        .allocation_id(trimmed_alloc)
+        .attribute(AddressAttributeName::DomainName)
+        .send()
+        .await
+        .map_err(|e| {
+            format!(
+                "Failed to clear Reverse DNS for {}: {}",
+                trimmed_alloc,
+                format_aws_err(&e)
+            )
+        })?;
+
+    Ok(format!(
+        "Cleared Reverse DNS (PTR) record for {}.",
+        trimmed_alloc
+    ))
+}
+
+fn looks_like_reverse_dns_block(msg: &str) -> bool {
+    let lower = msg.to_ascii_lowercase();
+    lower.contains("reverse dns")
+        || lower.contains("ptr")
+        || lower.contains("domain-name")
+        || lower.contains("domain name")
+}
+
+pub async fn release_elastic_ip(profile: &str, allocation_id: &str) -> Result<String, String> {
+    let trimmed_alloc = allocation_id.trim();
+    if trimmed_alloc.is_empty() {
+        return Err("Elastic IP allocation ID is required.".to_string());
+    }
+
+    let config = build_sdk_config(profile, None).await?;
+    let client = Client::new(&config);
+
+    let mut cleared_ptr = false;
+    let ptr_map = fetch_ptr_records_map(&client, &[trimmed_alloc.to_string()]).await;
+    let detected_ptr = ptr_map
+        .get(trimmed_alloc)
+        .and_then(|(ptr, _)| ptr.clone());
+
+    if let Some(ref ptr) = detected_ptr {
+        client
+            .reset_address_attribute()
+            .allocation_id(trimmed_alloc)
+            .attribute(AddressAttributeName::DomainName)
+            .send()
+            .await
+            .map_err(|e| {
+                format!(
+                    "Failed to clear Reverse DNS record ({}) before releasing {}: {}",
+                    ptr,
+                    trimmed_alloc,
+                    format_aws_err(&e)
+                )
+            })?;
+        cleared_ptr = true;
+    }
+
+    let first_attempt = client
+        .release_address()
+        .allocation_id(trimmed_alloc)
+        .send()
+        .await;
+
+    match first_attempt {
+        Ok(_) => {
+            if let Some(ref ptr) = detected_ptr {
+                Ok(format!(
+                    "Cleared Reverse DNS ({}) and released Elastic IP {}.",
+                    ptr, trimmed_alloc
+                ))
+            } else {
+                Ok(format!("Released Elastic IP {}.", trimmed_alloc))
+            }
+        }
+        Err(first_err) => {
+            let err_msg = format_aws_err(&first_err);
+            if cleared_ptr || looks_like_reverse_dns_block(&err_msg) {
+                if !cleared_ptr {
+                    client
+                        .reset_address_attribute()
+                        .allocation_id(trimmed_alloc)
+                        .attribute(AddressAttributeName::DomainName)
+                        .send()
+                        .await
+                        .map_err(|e| {
+                            format!(
+                                "Elastic IP {} has a Reverse DNS record and clearing it failed: {}",
+                                trimmed_alloc,
+                                format_aws_err(&e)
+                            )
+                        })?;
+                }
+
+                // Wait briefly for AWS EC2 PTR reset to propagate, then retry release
+                tokio::time::sleep(Duration::from_millis(1500)).await;
+                client
+                    .release_address()
+                    .allocation_id(trimmed_alloc)
+                    .send()
+                    .await
+                    .map_err(|e| {
+                        format!(
+                            "Cleared Reverse DNS for {}, but releasing Elastic IP still failed: {}",
+                            trimmed_alloc,
+                            format_aws_err(&e)
+                        )
+                    })?;
+
+                return Ok(format!(
+                    "Cleared Reverse DNS and released Elastic IP {}.",
+                    trimmed_alloc
+                ));
+            }
+
+            Err(format!(
+                "Failed to release Elastic IP {}: {}",
+                trimmed_alloc, err_msg
+            ))
+        }
+    }
 }

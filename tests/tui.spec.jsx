@@ -145,6 +145,11 @@ const BASE_TUI_PROPS = {
   associateInstanceIdx: 0,
   setAssociateInstanceIdx: () => {},
   submitAssociateEip: () => {},
+  showPtrEipModal: false,
+  setShowPtrEipModal: () => {},
+  eipPtrInput: '',
+  setEipPtrInput: () => {},
+  submitEditEipPtr: () => {},
   ec2ConfirmAction: null,
 };
 
@@ -195,6 +200,7 @@ test('TUI: EC2 Instances & Elastic IPs (State, IPs, Reboot Lock & EIPs) screensh
   expect(plain).toContain('spare-failover-eip');
   expect(plain).toContain('52.59.210.77');
   expect(plain).toContain('UNASSOCIATED');
+  expect(plain).toContain('mail.example.com.');
 
   await screenshotAnsiTerminal(
     page,

@@ -137,6 +137,11 @@ const App = (props) => {
     associateInstanceIdx,
     setAssociateInstanceIdx,
     submitAssociateEip,
+    showPtrEipModal,
+    setShowPtrEipModal,
+    eipPtrInput,
+    setEipPtrInput,
+    submitEditEipPtr,
     ec2ConfirmAction,
   } = props;
 
@@ -366,6 +371,11 @@ const App = (props) => {
             associateInstanceIdx={associateInstanceIdx}
             setAssociateInstanceIdx={setAssociateInstanceIdx}
             submitAssociateEip={submitAssociateEip}
+            showPtrEipModal={showPtrEipModal}
+            setShowPtrEipModal={setShowPtrEipModal}
+            eipPtrInput={eipPtrInput}
+            setEipPtrInput={setEipPtrInput}
+            submitEditEipPtr={submitEditEipPtr}
             ec2ConfirmAction={ec2ConfirmAction}
             statusMessage={statusMessage}
           />

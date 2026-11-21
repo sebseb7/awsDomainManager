@@ -23,6 +23,8 @@ import {
   associateElasticIp,
   disassociateElasticIp,
   releaseElasticIp,
+  updateElasticIpReverseDns,
+  resetElasticIpReverseDns,
 } from './services/ec2Service.js';
 import {
   loadBuckets,
@@ -118,6 +120,8 @@ const CLI = () => {
   const [newEipName, setNewEipName] = useState('');
   const [showAssociateEipModal, setShowAssociateEipModal] = useState(false);
   const [associateInstanceIdx, setAssociateInstanceIdx] = useState(0);
+  const [showPtrEipModal, setShowPtrEipModal] = useState(false);
+  const [eipPtrInput, setEipPtrInput] = useState('');
   const [ec2ConfirmAction, setEc2ConfirmAction] = useState(null);
 
   // S3 state
@@ -537,6 +541,40 @@ const CLI = () => {
     });
   };
 
+  const openEditEipPtr = () => {
+    if (selectedEc2Index < ec2Instances.length) {
+      setError('Select an Elastic IP row in the bottom table to update or clear Reverse DNS.');
+      return;
+    }
+    const eip = elasticIps[selectedEc2Index - ec2Instances.length];
+    if (!eip) return;
+    setError(null);
+    setStatusMessage(null);
+    setEipPtrInput(eip.ptrRecord ? eip.ptrRecord.replace(/\.$/, '') : '');
+    setShowPtrEipModal(true);
+  };
+
+  const submitEditEipPtr = async () => {
+    const eip = elasticIps[selectedEc2Index - ec2Instances.length];
+    if (!selectedAccount || !eip) return;
+    setLoading(true);
+    setError(null);
+    try {
+      const trimmed = eipPtrInput.trim();
+      const msg = trimmed
+        ? await updateElasticIpReverseDns(selectedAccount, eip.allocationId, trimmed)
+        : await resetElasticIpReverseDns(selectedAccount, eip.allocationId);
+      setShowPtrEipModal(false);
+      setEipPtrInput('');
+      setStatusMessage(msg);
+      await loadEc2InstancesAndEipsAndHandleError(selectedAccount);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const promptReleaseEip = () => {
     if (selectedEc2Index < ec2Instances.length) {
       setError('Select an unassociated Elastic IP row to release.');
@@ -553,8 +591,10 @@ const CLI = () => {
     setEc2ConfirmAction({
       type: 'release-eip',
       allocationId: eip.allocationId,
-      label: 'Release Elastic IP',
-      message: `Release Elastic IP ${eip.publicIp} (${eip.allocationId}) back to Amazon's pool?`,
+      label: eip.ptrRecord ? 'Clear Reverse DNS & Release Elastic IP' : 'Release Elastic IP',
+      message: eip.ptrRecord
+        ? `Elastic IP ${eip.publicIp} (${eip.allocationId}) has Reverse DNS "${eip.ptrRecord}". AWS requires removing Reverse DNS first — confirm to automatically clear PTR and release this Elastic IP?`
+        : `Release Elastic IP ${eip.publicIp} (${eip.allocationId}) back to Amazon's pool?`,
     });
   };
 
@@ -1569,6 +1609,11 @@ const CLI = () => {
         openAssociateEip();
       }
     },
+    handleEditEipPtr: () => {
+      if (screen === 'ec2-instances') {
+        openEditEipPtr();
+      }
+    },
     handleDisassociateEip: () => {
       if (screen === 'ec2-instances') {
         promptDisassociateEip();
@@ -1673,6 +1718,9 @@ const CLI = () => {
       } else if (showAssociateEipModal) {
         setShowAssociateEipModal(false);
         setError(null);
+      } else if (showPtrEipModal) {
+        setShowPtrEipModal(false);
+        setError(null);
       } else if (addKeyRole) {
         cancelAddBucketKey();
       } else if (showAddSesIdentity) {
@@ -1747,6 +1795,7 @@ const CLI = () => {
         setShowEc2DetailsModal(false);
         setShowAllocateEipModal(false);
         setShowAssociateEipModal(false);
+        setShowPtrEipModal(false);
         setEc2ConfirmAction(null);
         setStatusMessage(null);
         setError(null);
@@ -1790,6 +1839,7 @@ const CLI = () => {
       showEc2DetailsModal ||
       showAllocateEipModal ||
       showAssociateEipModal ||
+      showPtrEipModal ||
       Boolean(accountFormMode) ||
       Boolean(objectFormMode) ||
       Boolean(addKeyRole) ||
@@ -1920,6 +1970,11 @@ const CLI = () => {
       associateInstanceIdx={associateInstanceIdx}
       setAssociateInstanceIdx={setAssociateInstanceIdx}
       submitAssociateEip={submitAssociateEip}
+      showPtrEipModal={showPtrEipModal}
+      setShowPtrEipModal={setShowPtrEipModal}
+      eipPtrInput={eipPtrInput}
+      setEipPtrInput={setEipPtrInput}
+      submitEditEipPtr={submitEditEipPtr}
       ec2ConfirmAction={ec2ConfirmAction}
     />
   );

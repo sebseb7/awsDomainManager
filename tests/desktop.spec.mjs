@@ -138,9 +138,34 @@ test.beforeEach(async ({ page }) => {
               );
               return `Disassociated Elastic IP (association ${args.associationId}).`;
             }
+            case 'update_elastic_ip_reverse_dns': {
+              const normalized = (args.domainName || '').trim().replace(/\.$/, '');
+              currentEips = currentEips.map((e) =>
+                e.allocationId === args.allocationId
+                  ? {
+                      ...e,
+                      ptrRecord: normalized ? `${normalized}.` : null,
+                      ptrUpdateStatus: null,
+                    }
+                  : e
+              );
+              return `Updated Reverse DNS (PTR) for Elastic IP ${args.allocationId} to "${normalized}".`;
+            }
+            case 'reset_elastic_ip_reverse_dns': {
+              currentEips = currentEips.map((e) =>
+                e.allocationId === args.allocationId
+                  ? { ...e, ptrRecord: null, ptrUpdateStatus: null }
+                  : e
+              );
+              return `Cleared Reverse DNS (PTR) record for Elastic IP ${args.allocationId}.`;
+            }
             case 'release_elastic_ip': {
+              const target = currentEips.find((e) => e.allocationId === args.allocationId);
+              const ptr = target?.ptrRecord;
               currentEips = currentEips.filter((e) => e.allocationId !== args.allocationId);
-              return `Released Elastic IP ${args.allocationId}.`;
+              return ptr
+                ? `Cleared Reverse DNS (${ptr}) and released Elastic IP ${args.allocationId}.`
+                : `Released Elastic IP ${args.allocationId}.`;
             }
             case 'list_buckets':
               return buckets;
@@ -352,6 +377,7 @@ test('Desktop App: Route53, EC2, S3 IAM Keys (multiple read / single write), QR 
   await expect(page.getByText('Elastic IPs (3)')).toBeVisible();
   await expect(page.getByText('spare-failover-eip')).toBeVisible();
   await expect(page.getByText('52.59.210.77')).toBeVisible();
+  await expect(page.getByText('mail.example.com.')).toBeVisible();
   const webInstRow = page.locator('tr', { hasText: 'i-0a1b2c3d4e5f60101' });
   await expect(webInstRow.getByText('Locked', { exact: true })).toBeVisible();
   await expect(webInstRow.getByRole('button', { name: /Reboot/i })).toBeDisabled();
@@ -359,6 +385,17 @@ test('Desktop App: Route53, EC2, S3 IAM Keys (multiple read / single write), QR 
   await expect(apiInstRow.getByText('Unlocked', { exact: true })).toBeVisible();
   await expect(apiInstRow.getByRole('button', { name: /Reboot/i })).toBeEnabled();
   await page.screenshot({ path: 'docs/desktop-ec2-instances.png' });
+
+  // Test Elastic IP Release auto-clearing Reverse DNS (PTR)
+  const spareEipRow = page.locator('tr', { hasText: 'eipalloc-0a1b2c3d4e5f60003' });
+  await spareEipRow.getByRole('button', { name: /Release/i }).click();
+  await expect(page.getByText('Reverse DNS record will be cleared first')).toBeVisible();
+  await page.getByRole('button', { name: /Clear PTR & Release/i }).click();
+  await expect(
+    page.getByText(
+      'Cleared Reverse DNS (mail.example.com.) and released Elastic IP eipalloc-0a1b2c3d4e5f60003.'
+    )
+  ).toBeVisible();
 
   // Test toggling Reboot Lock and rebooting an unlocked instance
   await apiInstRow.getByRole('button', { name: /Reboot/i }).click();
@@ -476,6 +513,7 @@ test('Desktop App: Route53, EC2, S3 IAM Keys (multiple read / single write), QR 
   await expect(page.getByText('ec2:DescribeInstances')).toBeVisible();
   await expect(page.getByText('ec2:RebootInstances')).toBeVisible();
   await expect(page.getByText('ec2:DescribeAddresses')).toBeVisible();
+  await expect(page.getByText('ec2:*Address*Attribute')).toBeVisible();
   await expect(page.getByText('ses:CreateEmailIdentity')).toBeVisible();
   const policyText = await page.locator('pre.code-block').innerText();
   expect(policyText.length).toBeLessThanOrEqual(2048);
