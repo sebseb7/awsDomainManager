@@ -63,4 +63,85 @@ Resource Selection
 
 - Node.js 18+
 - AWS credentials configured in `~/.aws/credentials` (or add them via **Manage AWS Accounts**)
-- AWS region configured in `~/.aws/config` (EC2 is region-specific)
+- AWS region configured in `~/.aws/config` (EC2 and S3 are region-specific)
+
+## Minimum IAM Permissions (Least Privilege)
+
+Create a dedicated IAM user for this tool instead of using root or `AdministratorAccess` credentials. Attach only the statements below for the features you plan to use (you can omit any statement for a service you do not use):
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "Route53ListHostedZones",
+      "Effect": "Allow",
+      "Action": [
+        "route53:ListHostedZones"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "Route53ManageRecords",
+      "Effect": "Allow",
+      "Action": [
+        "route53:ListResourceRecordSets",
+        "route53:ChangeResourceRecordSets"
+      ],
+      "Resource": "arn:aws:route53:::hostedzone/*"
+    },
+    {
+      "Sid": "EC2SecurityGroupRules",
+      "Effect": "Allow",
+      "Action": [
+        "ec2:DescribeSecurityGroups",
+        "ec2:DescribeSecurityGroupRules",
+        "ec2:AuthorizeSecurityGroupIngress",
+        "ec2:RevokeSecurityGroupIngress"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "S3ListBuckets",
+      "Effect": "Allow",
+      "Action": [
+        "s3:ListAllMyBuckets"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "S3ManageBucketsAndObjects",
+      "Effect": "Allow",
+      "Action": [
+        "s3:CreateBucket",
+        "s3:DeleteBucket",
+        "s3:ListBucket",
+        "s3:GetObject",
+        "s3:PutObject",
+        "s3:DeleteObject"
+      ],
+      "Resource": [
+        "arn:aws:s3:::*",
+        "arn:aws:s3:::*/*"
+      ]
+    },
+    {
+      "Sid": "IAMCreateBucketUsersOnly",
+      "Effect": "Allow",
+      "Action": [
+        "iam:CreateUser",
+        "iam:PutUserPolicy",
+        "iam:TagUser",
+        "iam:CreateAccessKey"
+      ],
+      "Resource": "arn:aws:iam::*:user/s3-bucket-users/*"
+    }
+  ]
+}
+```
+
+### Locking down permissions further
+
+- **IAM bucket-user isolation**: All optional IAM users created when creating an S3 bucket are placed under the `/s3-bucket-users/` path (`arn:aws:iam::<account-id>:user/s3-bucket-users/<username>`). The `IAMCreateBucketUsersOnly` statement above ensures this tool's user cannot touch any other IAM users in your account. Omit this statement completely if you don't create per-bucket IAM users.
+- **Scoped Route53 / S3 resources**: Replace `arn:aws:route53:::hostedzone/*` with specific hosted zone IDs, or `arn:aws:s3:::*` with specific bucket name patterns (e.g. `arn:aws:s3:::my-prefix-*`).
+- **Read-only usage**: Remove `ChangeResourceRecordSets`, `AuthorizeSecurityGroupIngress`, `RevokeSecurityGroupIngress`, `CreateBucket`, `DeleteBucket`, `PutObject`, `DeleteObject`, and the `IAMCreateBucketUsersOnly` statement if you only need read/view access.

@@ -6,6 +6,8 @@ import {
 } from '@aws-sdk/client-iam';
 import { fromIni } from '@aws-sdk/credential-provider-ini';
 
+export const BUCKET_USER_PATH = '/s3-bucket-users/';
+
 export const IAM_ACCESS_OPTIONS = [
   { id: 'none', label: 'None (no IAM user)' },
   { id: 'put-only', label: 'Put Only (upload only, no read/delete)' },
@@ -168,6 +170,7 @@ export const createBucketIamUsers = async (account, bucketName, accessMode, cust
       await client.send(
         new CreateUserCommand({
           UserName: userName,
+          Path: BUCKET_USER_PATH,
           Tags: [
             { Key: 'ManagedBy', Value: 'aws-domain-manager' },
             { Key: 'S3Bucket', Value: bucketName },
