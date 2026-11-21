@@ -102,6 +102,7 @@ export interface SesIdentity {
   verificationStatus: string;
   dkimStatus: string;
   dkimTokens?: string[];
+  dkimRecordsPublished?: boolean;
   sendingEnabled: boolean;
   matchedZoneId?: string | null;
   matchedZoneName?: string | null;

@@ -244,6 +244,33 @@ export const matchDomainInZones = (domain, allZones) => {
 };
 
 /**
+ * Check whether all Easy DKIM CNAME records for a domain already exist in a Route53 zone's records
+ * @param {string} domain
+ * @param {string} zoneName
+ * @param {Array<string>} dkimTokens
+ * @param {Array<{ name: string, type: string, value: string }>} records
+ * @returns {boolean}
+ */
+export const checkDkimRecordsInList = (domain, zoneName, dkimTokens, records) => {
+  if (!dkimTokens || dkimTokens.length === 0) return false;
+  const cleanDomain = (domain || '').trim().replace(/\.$/, '').toLowerCase();
+  const cleanZone = (zoneName || '').trim().replace(/\.$/, '').toLowerCase();
+  return dkimTokens.every((token) => {
+    const t = (token || '').trim().toLowerCase();
+    if (!t) return false;
+    const expectedFqdn = `${t}._domainkey.${cleanDomain}`;
+    return (records || []).some((r) => {
+      if (r.type !== 'CNAME') return false;
+      const recFqdn =
+        !r.name || r.name === '@'
+          ? cleanZone
+          : `${r.name.toLowerCase()}.${cleanZone}`;
+      return recFqdn === expectedFqdn;
+    });
+  });
+};
+
+/**
  * Upsert Easy DKIM CNAME records for a domain into a Route53 hosted zone
  * @param {Object} zoneAccount
  * @param {string} zoneId

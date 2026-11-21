@@ -51,13 +51,39 @@ fn format_record_name(record_name: &str, zone_name: &str) -> String {
     }
 }
 
-fn full_record_name(name: &str, zone_name: &str) -> String {
+pub fn full_record_name(name: &str, zone_name: &str) -> String {
     let trimmed = name.trim();
     if trimmed.is_empty() || trimmed == "@" {
         zone_name.to_string()
     } else {
         format!("{}.{}", trimmed, zone_name)
     }
+}
+
+pub fn check_dkim_records_in_list(
+    domain: &str,
+    zone_name: &str,
+    dkim_tokens: &[String],
+    records: &[DnsRecordDto],
+) -> bool {
+    if dkim_tokens.is_empty() {
+        return false;
+    }
+    let clean_domain = domain.trim().trim_end_matches('.').to_ascii_lowercase();
+    dkim_tokens.iter().all(|token| {
+        let trimmed_token = token.trim().to_ascii_lowercase();
+        if trimmed_token.is_empty() {
+            return false;
+        }
+        let expected_fqdn = format!("{}._domainkey.{}", trimmed_token, clean_domain);
+        records.iter().any(|r| {
+            r.record_type == "CNAME"
+                && full_record_name(&r.name, zone_name)
+                    .trim_end_matches('.')
+                    .to_ascii_lowercase()
+                    == expected_fqdn
+        })
+    })
 }
 
 pub async fn list_hosted_zones(profile: &str) -> Result<Vec<HostedZoneDto>, String> {

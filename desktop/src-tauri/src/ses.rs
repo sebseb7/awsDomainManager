@@ -1,10 +1,12 @@
 use crate::aws_client::build_sdk_config;
 use crate::route53::{
-    load_all_zones_across_profiles, match_domain_in_zones, upsert_dkim_cname_records,
+    check_dkim_records_in_list, list_dns_records, load_all_zones_across_profiles,
+    match_domain_in_zones, upsert_dkim_cname_records, DnsRecordDto,
 };
 use aws_sdk_sesv2::error::{DisplayErrorContext, ProvideErrorMetadata};
 use aws_sdk_sesv2::Client;
 use serde::Serialize;
+use std::collections::HashMap;
 
 fn format_aws_err<E: ProvideErrorMetadata + std::error::Error>(err: &E) -> String {
     match (err.code(), err.message()) {
@@ -23,6 +25,7 @@ pub struct SesIdentityDto {
     pub verification_status: String,
     pub dkim_status: String,
     pub dkim_tokens: Vec<String>,
+    pub dkim_records_published: bool,
     pub sending_enabled: bool,
     pub matched_zone_id: Option<String>,
     pub matched_zone_name: Option<String>,
@@ -71,6 +74,7 @@ pub async fn list_ses_identities(profile: &str) -> Result<Vec<SesIdentityDto>, S
         Vec::new()
     };
 
+    let mut zone_records_cache: HashMap<String, Vec<DnsRecordDto>> = HashMap::new();
     let mut identities = Vec::new();
     for item in raw_identities {
         let identity_name = match item.identity_name() {
@@ -111,6 +115,28 @@ pub async fn list_ses_identities(profile: &str) -> Result<Vec<SesIdentityDto>, S
             None
         };
 
+        let mut dkim_records_published = dkim_status == "SUCCESS";
+        if !dkim_records_published && !dkim_tokens.is_empty() {
+            if let Some(mz) = &matched_zone {
+                let records = if let Some(cached) = zone_records_cache.get(&mz.zone_id) {
+                    cached.clone()
+                } else {
+                    let fetched =
+                        list_dns_records(&mz.profile, &mz.zone_id, &mz.zone_name)
+                            .await
+                            .unwrap_or_default();
+                    zone_records_cache.insert(mz.zone_id.clone(), fetched.clone());
+                    fetched
+                };
+                dkim_records_published = check_dkim_records_in_list(
+                    &identity_name,
+                    &mz.zone_name,
+                    &dkim_tokens,
+                    &records,
+                );
+            }
+        }
+
         let type_label = format_type_label(&identity_type).to_string();
         identities.push(SesIdentityDto {
             identity_name,
@@ -119,6 +145,7 @@ pub async fn list_ses_identities(profile: &str) -> Result<Vec<SesIdentityDto>, S
             verification_status,
             dkim_status,
             dkim_tokens,
+            dkim_records_published,
             sending_enabled: item.sending_enabled(),
             matched_zone_id: matched_zone.as_ref().map(|z| z.zone_id.clone()),
             matched_zone_name: matched_zone.as_ref().map(|z| z.zone_name.clone()),

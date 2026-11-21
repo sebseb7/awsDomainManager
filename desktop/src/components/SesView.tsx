@@ -180,7 +180,8 @@ export const SesView: React.FC<Props> = ({ account, onError, onSuccess }) => {
                 {filtered.map((item) => {
                   const isDomain = item.identityType === 'DOMAIN';
                   const hasTokens = (item.dkimTokens?.length || 0) > 0;
-                  const needsDkimPublish = isDomain && item.dkimStatus !== 'SUCCESS';
+                  const alreadyPublished =
+                    Boolean(item.dkimRecordsPublished) || item.dkimStatus === 'SUCCESS';
                   return (
                     <tr key={item.identityName}>
                       <td style={{ fontWeight: 600 }}>
@@ -193,10 +194,16 @@ export const SesView: React.FC<Props> = ({ account, onError, onSuccess }) => {
                           <span className="mono">{item.identityName}</span>
                           {item.matchedZoneName && (
                             <span
-                              className="badge badge-blue"
-                              title={`Managed in Route53 zone ${item.matchedZoneName} (${item.matchedZoneProfile || account.profile})`}
+                              className={`badge ${alreadyPublished ? 'badge-green' : 'badge-blue'}`}
+                              style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}
+                              title={
+                                alreadyPublished
+                                  ? `DKIM CNAME records published in Route53 zone ${item.matchedZoneName} (${item.matchedZoneProfile || account.profile})`
+                                  : `Managed in Route53 zone ${item.matchedZoneName} (${item.matchedZoneProfile || account.profile})`
+                              }
                             >
-                              Route53
+                              {alreadyPublished && <Check size={11} />}
+                              {alreadyPublished ? 'R53 Published' : 'Route53'}
                             </span>
                           )}
                         </div>
@@ -226,9 +233,9 @@ export const SesView: React.FC<Props> = ({ account, onError, onSuccess }) => {
                               <Eye size={13} /> DNS
                             </button>
                           )}
-                          {isDomain && (hasTokens || item.matchedZoneId) && (
+                          {isDomain && !alreadyPublished && (hasTokens || item.matchedZoneId) && (
                             <button
-                              className={`btn btn-sm ${needsDkimPublish && item.matchedZoneId ? 'btn-primary' : ''}`}
+                              className="btn btn-primary btn-sm"
                               title={
                                 item.matchedZoneName
                                   ? `Publish 3 Easy DKIM CNAME records to Route53 zone ${item.matchedZoneName}`
@@ -371,17 +378,20 @@ export const SesView: React.FC<Props> = ({ account, onError, onSuccess }) => {
               <button className="btn" onClick={() => setDkimModalTarget(null)}>
                 Close
               </button>
-              <button
-                className="btn btn-primary"
-                onClick={async () => {
-                  const target = dkimModalTarget;
-                  setDkimModalTarget(null);
-                  await handlePublishDkim(target);
-                }}
-                disabled={loading}
-              >
-                <UploadCloud size={14} /> Publish CNAME Records to Route53
-              </button>
+              {!dkimModalTarget.dkimRecordsPublished &&
+                dkimModalTarget.dkimStatus !== 'SUCCESS' && (
+                  <button
+                    className="btn btn-primary"
+                    onClick={async () => {
+                      const target = dkimModalTarget;
+                      setDkimModalTarget(null);
+                      await handlePublishDkim(target);
+                    }}
+                    disabled={loading}
+                  >
+                    <UploadCloud size={14} /> Publish CNAME Records to Route53
+                  </button>
+                )}
             </div>
           </div>
         </div>

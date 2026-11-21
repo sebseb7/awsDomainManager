@@ -192,8 +192,10 @@ const SesScreen = ({
             const typeTag = isDomain ? '[DOMAIN]' : '[EMAIL]';
             const typeColor = isSelected ? 'cyan' : isDomain ? 'yellow' : 'blue';
             const rowColor = isSelected ? 'cyan' : undefined;
+            const alreadyPublished =
+              Boolean(item.dkimRecordsPublished) || item.dkimStatus === 'SUCCESS';
             const nameWithR53 = item.matchedZoneName
-              ? `${item.identityName} [R53]`
+              ? `${item.identityName} ${alreadyPublished ? '[R53 OK]' : '[R53 !]'}`
               : item.identityName;
             const nameDisplay =
               nameWithR53.length > 34

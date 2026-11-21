@@ -7,8 +7,10 @@ import {
 } from '@aws-sdk/client-sesv2';
 import { fromIni } from '@aws-sdk/credential-provider-ini';
 import {
+  loadRecords,
   loadAllZonesAcrossAccounts,
   matchDomainInZones,
+  checkDkimRecordsInList,
   upsertDkimCnameRecords,
 } from './route53Service.js';
 
@@ -54,6 +56,7 @@ export const loadSesIdentities = async (account, allAccounts = []) => {
       ? await loadAllZonesAcrossAccounts(account, allAccounts)
       : [];
 
+    const zoneRecordsCache = new Map();
     const identities = [];
     for (const item of rawIdentities) {
       const identityName = item.IdentityName || '';
@@ -83,6 +86,26 @@ export const loadSesIdentities = async (account, allAccounts = []) => {
       const matched =
         identityType === 'DOMAIN' ? matchDomainInZones(identityName, allZones) : null;
 
+      let dkimRecordsPublished = dkimStatus === 'SUCCESS';
+      if (!dkimRecordsPublished && matched && dkimTokens.length > 0) {
+        const zId = matched.zone.Id;
+        let records = zoneRecordsCache.get(zId);
+        if (!records) {
+          try {
+            records = await loadRecords(matched.account, matched.zone);
+          } catch {
+            records = [];
+          }
+          zoneRecordsCache.set(zId, records);
+        }
+        dkimRecordsPublished = checkDkimRecordsInList(
+          identityName,
+          matched.zone.Name,
+          dkimTokens,
+          records
+        );
+      }
+
       identities.push({
         identityName,
         identityType,
@@ -90,6 +113,7 @@ export const loadSesIdentities = async (account, allAccounts = []) => {
         verificationStatus,
         dkimStatus,
         dkimTokens,
+        dkimRecordsPublished,
         sendingEnabled: Boolean(item.SendingEnabled),
         matchedZoneId: matched?.zone?.Id || null,
         matchedZoneName: matched?.zone?.Name || null,
