@@ -1,10 +1,18 @@
 use crate::aws_client::build_sdk_config;
-use aws_sdk_iam::error::DisplayErrorContext;
+use aws_sdk_iam::error::{DisplayErrorContext, ProvideErrorMetadata};
 use aws_sdk_iam::types::Tag;
 use aws_sdk_iam::Client;
 use serde::Serialize;
 use serde_json::json;
 use std::collections::HashSet;
+
+fn format_aws_err<E: ProvideErrorMetadata + std::error::Error>(err: &E) -> String {
+    match (err.code(), err.message()) {
+        (Some(code), Some(msg)) => format!("{}: {}", code, msg),
+        (None, Some(msg)) => msg.to_string(),
+        _ => format!("{}", DisplayErrorContext(err)),
+    }
+}
 
 const BUCKET_USER_PATH: &str = "/s3-bucket-users/";
 
@@ -214,7 +222,7 @@ pub async fn create_bucket_iam_users(
                     "Bucket \"{}\" was created, but failed creating IAM user \"{}\": {}",
                     bucket_name,
                     user_name,
-                    DisplayErrorContext(&e)
+                    format_aws_err(&e)
                 )
             })?;
 
@@ -234,7 +242,7 @@ pub async fn create_bucket_iam_users(
                     "Bucket \"{}\" was created, but failed attaching policy to IAM user \"{}\": {}",
                     bucket_name,
                     user_name,
-                    DisplayErrorContext(&e)
+                    format_aws_err(&e)
                 )
             })?;
 
@@ -248,7 +256,7 @@ pub async fn create_bucket_iam_users(
                     "Bucket \"{}\" was created, but failed creating access key for IAM user \"{}\": {}",
                     bucket_name,
                     user_name,
-                    DisplayErrorContext(&e)
+                    format_aws_err(&e)
                 )
             })?;
 
@@ -284,7 +292,7 @@ async fn list_all_managed_users(
         let resp = req
             .send()
             .await
-            .map_err(|e| format!("Failed listing IAM users: {}", DisplayErrorContext(&e)))?;
+            .map_err(|e| format!("Failed listing IAM users: {}", format_aws_err(&e)))?;
         users.extend(resp.users().iter().cloned());
         if resp.is_truncated() {
             marker = resp.marker().map(|s| s.to_string());
@@ -329,7 +337,7 @@ async fn inspect_candidate_user(
     let tags_resp = match client.list_user_tags().user_name(user_name).send().await {
         Ok(resp) => resp,
         Err(e) => {
-            let msg = format!("{}", DisplayErrorContext(&e));
+            let msg = format_aws_err(&e);
             if msg.contains("NoSuchEntity") {
                 return Ok(None);
             }
@@ -367,7 +375,7 @@ async fn inspect_candidate_user(
             format!(
                 "Failed listing access keys for IAM user \"{}\": {}",
                 user_name,
-                DisplayErrorContext(&e)
+                format_aws_err(&e)
             )
         })?;
 
@@ -574,7 +582,7 @@ pub async fn create_bucket_iam_user(
             format!(
                 "Failed creating IAM user \"{}\": {}",
                 user_name,
-                DisplayErrorContext(&e)
+                format_aws_err(&e)
             )
         })?;
 
@@ -593,7 +601,7 @@ pub async fn create_bucket_iam_user(
             format!(
                 "Failed attaching policy to IAM user \"{}\": {}",
                 user_name,
-                DisplayErrorContext(&e)
+                format_aws_err(&e)
             )
         })?;
 
@@ -606,7 +614,7 @@ pub async fn create_bucket_iam_user(
             format!(
                 "Failed creating access key for IAM user \"{}\": {}",
                 user_name,
-                DisplayErrorContext(&e)
+                format_aws_err(&e)
             )
         })?;
 
@@ -647,7 +655,7 @@ pub async fn recreate_bucket_iam_user(
             format!(
                 "Failed listing access keys for \"{}\": {}",
                 user_name,
-                DisplayErrorContext(&e)
+                format_aws_err(&e)
             )
         })?;
 
@@ -664,7 +672,7 @@ pub async fn recreate_bucket_iam_user(
                         "Failed deleting old access key \"{}\" for \"{}\": {}",
                         key_id,
                         user_name,
-                        DisplayErrorContext(&e)
+                        format_aws_err(&e)
                     )
                 })?;
         }
@@ -685,7 +693,7 @@ pub async fn recreate_bucket_iam_user(
             format!(
                 "Failed updating policy for \"{}\": {}",
                 user_name,
-                DisplayErrorContext(&e)
+                format_aws_err(&e)
             )
         })?;
 
@@ -698,7 +706,7 @@ pub async fn recreate_bucket_iam_user(
             format!(
                 "Failed creating new access key for \"{}\": {}",
                 user_name,
-                DisplayErrorContext(&e)
+                format_aws_err(&e)
             )
         })?;
 
@@ -730,7 +738,7 @@ pub async fn revoke_bucket_iam_user(profile: &str, user_name: &str) -> Result<()
             format!(
                 "Failed listing access keys for \"{}\": {}",
                 user_name,
-                DisplayErrorContext(&e)
+                format_aws_err(&e)
             )
         })?;
 
@@ -747,7 +755,7 @@ pub async fn revoke_bucket_iam_user(profile: &str, user_name: &str) -> Result<()
                         "Failed deleting access key \"{}\" for \"{}\": {}",
                         key_id,
                         user_name,
-                        DisplayErrorContext(&e)
+                        format_aws_err(&e)
                     )
                 })?;
         }
@@ -762,7 +770,7 @@ pub async fn revoke_bucket_iam_user(profile: &str, user_name: &str) -> Result<()
             format!(
                 "Failed listing inline policies for \"{}\": {}",
                 user_name,
-                DisplayErrorContext(&e)
+                format_aws_err(&e)
             )
         })?;
 
@@ -778,7 +786,7 @@ pub async fn revoke_bucket_iam_user(profile: &str, user_name: &str) -> Result<()
                     "Failed deleting inline policy \"{}\" for \"{}\": {}",
                     policy_name,
                     user_name,
-                    DisplayErrorContext(&e)
+                    format_aws_err(&e)
                 )
             })?;
     }
@@ -792,7 +800,7 @@ pub async fn revoke_bucket_iam_user(profile: &str, user_name: &str) -> Result<()
             format!(
                 "Failed deleting IAM user \"{}\": {}",
                 user_name,
-                DisplayErrorContext(&e)
+                format_aws_err(&e)
             )
         })?;
 

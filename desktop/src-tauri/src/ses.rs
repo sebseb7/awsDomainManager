@@ -1,7 +1,15 @@
 use crate::aws_client::build_sdk_config;
-use aws_sdk_sesv2::error::DisplayErrorContext;
+use aws_sdk_sesv2::error::{DisplayErrorContext, ProvideErrorMetadata};
 use aws_sdk_sesv2::Client;
 use serde::Serialize;
+
+fn format_aws_err<E: ProvideErrorMetadata + std::error::Error>(err: &E) -> String {
+    match (err.code(), err.message()) {
+        (Some(code), Some(msg)) => format!("{}: {}", code, msg),
+        (None, Some(msg)) => msg.to_string(),
+        _ => format!("{}", DisplayErrorContext(err)),
+    }
+}
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -38,7 +46,7 @@ pub async fn list_ses_identities(profile: &str) -> Result<Vec<SesIdentityDto>, S
         let resp = req
             .send()
             .await
-            .map_err(|e| format!("Failed to load SES identities: {}", DisplayErrorContext(&e)))?;
+            .map_err(|e| format!("Failed to load SES identities: {}", format_aws_err(&e)))?;
 
         raw_identities.extend(resp.email_identities().iter().cloned());
         next_token = resp.next_token().map(|s| s.to_string());
@@ -119,7 +127,7 @@ pub async fn create_ses_identity(profile: &str, identity_name: &str) -> Result<S
             format!(
                 "Failed to create SES identity \"{}\": {}",
                 trimmed,
-                DisplayErrorContext(&e)
+                format_aws_err(&e)
             )
         })?;
 
@@ -139,7 +147,7 @@ pub async fn delete_ses_identity(profile: &str, identity_name: &str) -> Result<(
             format!(
                 "Failed to delete SES identity \"{}\": {}",
                 identity_name,
-                DisplayErrorContext(&e)
+                format_aws_err(&e)
             )
         })?;
 
