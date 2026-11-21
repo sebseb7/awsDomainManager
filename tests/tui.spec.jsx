@@ -15,6 +15,7 @@ import {
   DUMMY_BUCKET_IAM_USERS,
   DUMMY_RECREATED_CREDENTIAL,
   DUMMY_SES_IDENTITIES,
+  DUMMY_SES_SENDER_KEYS,
 } from './fixtures/dummyData.mjs';
 
 mkdirSync('docs', { recursive: true });
@@ -110,6 +111,23 @@ const BASE_TUI_PROPS = {
   sesIdentityInput: '',
   setSesIdentityInput: () => {},
   addSesIdentity: () => {},
+  selectedSesIdentity: DUMMY_SES_IDENTITIES[3],
+  sesSenderKeys: DUMMY_SES_SENDER_KEYS,
+  selectedSesKeyIndex: 0,
+  showAddSesKey: false,
+  sesKeyUserName: '',
+  setSesKeyUserName: () => {},
+  submitAddSesKey: () => {},
+  cancelAddSesKey: () => {},
+  sesKeyConfirmAction: null,
+  createdSesKeyResult: null,
+  dismissCreatedSesKeyResult: () => {},
+  openSmtpTesterWithCred: () => {},
+  showSmtpTestForm: false,
+  smtpTestFormData: {},
+  setSmtpTestFormData: () => {},
+  submitSmtpTest: () => {},
+  cancelSmtpTest: () => {},
 };
 
 test('TUI: Route53 DNS Records screenshot', async ({ page }) => {
@@ -206,6 +224,10 @@ test('TUI: Amazon SES Identities (Domains & Email Addresses) screenshot', async 
   expect(plain).toContain('Domains: 3');
   expect(plain).toContain('Email Addresses: 3');
   expect(plain).toContain('alerts@example.com');
+  expect(plain).toContain('Action required');
+  expect(plain).toContain('dev-team@staging.example.com');
+  expect(plain).toContain('resend');
+  expect(plain).toContain('publish MX');
 
   await screenshotAnsiTerminal(
     page,
@@ -213,4 +235,52 @@ test('TUI: Amazon SES Identities (Domains & Email Addresses) screenshot', async 
     'docs/tui-ses.png',
     'aws-domain-manager — Amazon SES Identities'
   );
+});
+
+test('TUI: Amazon SES SMTP Sender Keys (AmazonSesSendingAccess) screen', async () => {
+  const ansi = await renderInkToAnsi(
+    <App
+      {...BASE_TUI_PROPS}
+      screen="ses-keys"
+      selectedResource={{ id: 'ses', name: 'Amazon SES' }}
+      selectedSesIdentity={DUMMY_SES_IDENTITIES[3]}
+      sesSenderKeys={DUMMY_SES_SENDER_KEYS}
+      selectedSesKeyIndex={0}
+    />,
+    { columns: 108, rows: 24 }
+  );
+
+  const plain = stripAnsi(ansi);
+  expect(plain).toContain('SMTP Sender Keys for alerts@example.com');
+  expect(plain).toContain('AmazonSesSendingAccess');
+  expect(plain).toContain('ses-alerts-example-com');
+  expect(plain).toContain('ses-alerts-ci-notifier');
+  expect(plain).toContain('AKIASMTPSENDER01EXMP');
+  expect(plain).toContain('test SMTP send');
+
+  const qrAnsi = await renderInkToAnsi(
+    <App
+      {...BASE_TUI_PROPS}
+      screen="ses-keys"
+      selectedResource={{ id: 'ses', name: 'Amazon SES' }}
+      selectedSesIdentity={DUMMY_SES_IDENTITIES[3]}
+      sesSenderKeys={DUMMY_SES_SENDER_KEYS}
+      createdSesKeyResult={{
+        identityName: 'alerts@example.com',
+        userName: 'ses-alerts-example-com',
+        region: 'eu-central-1',
+        smtpHost: 'email-smtp.eu-central-1.amazonaws.com',
+        smtpPort: 587,
+        smtpUsername: 'AKIASMTPSENDER01EXMP',
+        smtpPassword: 'BNExampleSigV4DerivedSmtpPassword000000000000=',
+      }}
+    />,
+    { columns: 108, rows: 48 }
+  );
+  const qrPlain = stripAnsi(qrAnsi);
+  expect(qrPlain).toContain('SMTP Sender Key Ready — alerts@example.com');
+  expect(qrPlain).toContain('pos420settings');
+  expect(qrPlain).toContain('backupemailreceiver');
+  expect(qrPlain).toContain('reconciliationemailreceiver');
+  expect(qrPlain).toContain('█');
 });

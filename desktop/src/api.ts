@@ -6,6 +6,7 @@ import type {
   AwsProfile,
   BucketIamUser,
   CreatedIamUser,
+  CreatedSesSenderKey,
   DnsRecord,
   HostedZone,
   InboundRule,
@@ -13,6 +14,8 @@ import type {
   S3Object,
   SecurityGroup,
   SesIdentity,
+  SesSenderKeyUser,
+  SmtpTestSendInput,
 } from './types';
 
 export const api = {
@@ -114,10 +117,32 @@ export const api = {
     invoke<SesIdentity[]>('list_ses_identities', { profile }),
   createSesIdentity: (profile: string, identityName: string) =>
     invoke<string>('create_ses_identity', { profile, identityName }),
+  resendSesVerificationEmail: (profile: string, identityName: string) =>
+    invoke<string>('resend_ses_verification_email', { profile, identityName }),
   publishSesDkimRecords: (profile: string, domain: string, dkimTokens: string[] = []) =>
     invoke<string>('publish_ses_dkim_records', { profile, domain, dkimTokens }),
+  publishSesMxRecord: (profile: string, domain: string) =>
+    invoke<string>('publish_ses_mx_record', { profile, domain }),
   deleteSesIdentity: (profile: string, identityName: string) =>
     invoke<void>('delete_ses_identity', { profile, identityName }),
+  listSesSenderKeys: (profile: string, identityName: string) =>
+    invoke<SesSenderKeyUser[]>('list_ses_sender_keys', { profile, identityName }),
+  createSesSenderKey: (profile: string, identityName: string, customUserName: string) =>
+    invoke<CreatedSesSenderKey>('create_ses_sender_key', {
+      profile,
+      identityName,
+      customUserName,
+    }),
+  recreateSesSenderKey: (profile: string, identityName: string, userName: string) =>
+    invoke<CreatedSesSenderKey>('recreate_ses_sender_key', {
+      profile,
+      identityName,
+      userName,
+    }),
+  revokeSesSenderKey: (profile: string, userName: string) =>
+    invoke<void>('revoke_ses_sender_key', { profile, userName }),
+  testSesSmtpSend: (input: SmtpTestSendInput) =>
+    invoke<string>('test_ses_smtp_send', { input }),
 
   // Native file dialogs
   pickUploadFile: async (): Promise<string | null> => {

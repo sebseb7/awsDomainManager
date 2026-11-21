@@ -255,6 +255,59 @@ export const extractDomainFromIdentity = (identity) => {
 };
 
 /**
+ * Get the Amazon SES inbound SMTP MX hostname for an AWS region
+ * @param {string} [region='us-east-1']
+ * @returns {string}
+ */
+export const getSesInboundMxHost = (region) => {
+  const r = (region || '').trim() || 'us-east-1';
+  return `inbound-smtp.${r}.amazonaws.com`;
+};
+
+/**
+ * Get the Amazon SES inbound MX record value for an AWS region
+ * @param {string} [region='us-east-1']
+ * @returns {string}
+ */
+export const getSesInboundMxValue = (region) => `10 ${getSesInboundMxHost(region)}`;
+
+/**
+ * Find any existing MX record for a domain in a Route53 zone's records
+ * @param {string} domain
+ * @param {string} zoneName
+ * @param {Array<{ name: string, type: string, value: string }>} records
+ * @returns {string | null}
+ */
+export const findMxRecordInList = (domain, zoneName, records) => {
+  const cleanDomain = extractDomainFromIdentity(domain).toLowerCase();
+  const cleanZone = (zoneName || '').trim().replace(/\.$/, '').toLowerCase();
+  if (!cleanDomain || !cleanZone) return null;
+  const match = (records || []).find((r) => {
+    if (r.type !== 'MX') return false;
+    const recFqdn =
+      !r.name || r.name === '@'
+        ? cleanZone
+        : `${r.name.toLowerCase()}.${cleanZone}`;
+    return recFqdn === cleanDomain;
+  });
+  return match ? match.value || '' : null;
+};
+
+/**
+ * Check whether an Amazon SES inbound MX record already exists for a domain
+ * @param {string} domain
+ * @param {string} zoneName
+ * @param {string} region
+ * @param {Array<{ name: string, type: string, value: string }>} records
+ * @returns {boolean}
+ */
+export const checkSesMxRecordInList = (domain, zoneName, region, records) => {
+  const existing = findMxRecordInList(domain, zoneName, records);
+  if (!existing) return false;
+  return existing.toLowerCase().includes(getSesInboundMxHost(region).toLowerCase());
+};
+
+/**
  * Check whether a DMARC TXT record (_dmarc.<domain>) already exists in a Route53 zone's records
  * @param {string} domain
  * @param {string} zoneName
@@ -362,5 +415,45 @@ export const upsertSesDnsRecords = async (
     return changes.length;
   } catch (err) {
     throw new Error(`Failed publishing SES DNS records to Route53: ${err.message}`);
+  }
+};
+
+/**
+ * Upsert an Amazon SES inbound MX record (10 inbound-smtp.<region>.amazonaws.com) for a domain into Route53
+ * @param {Object} zoneAccount
+ * @param {string} zoneId
+ * @param {string} domain
+ * @param {string} region
+ * @returns {Promise<string>} Published MX record value
+ */
+export const upsertSesMxRecord = async (zoneAccount, zoneId, domain, region) => {
+  const cleanDomain = extractDomainFromIdentity(domain);
+  if (!cleanDomain) {
+    throw new Error('Domain name is required.');
+  }
+  const mxValue = getSesInboundMxValue(region);
+  try {
+    const client = createRoute53Client(zoneAccount);
+    await client.send(
+      new ChangeResourceRecordSetsCommand({
+        HostedZoneId: zoneId,
+        ChangeBatch: {
+          Changes: [
+            {
+              Action: 'UPSERT',
+              ResourceRecordSet: {
+                Name: `${cleanDomain}.`,
+                Type: 'MX',
+                TTL: 300,
+                ResourceRecords: [{ Value: mxValue }],
+              },
+            },
+          ],
+        },
+      })
+    );
+    return mxValue;
+  } catch (err) {
+    throw new Error(`Failed publishing SES inbound MX record to Route53: ${err.message}`);
   }
 };

@@ -69,6 +69,55 @@ pub fn extract_domain_from_identity(identity: &str) -> String {
     }
 }
 
+pub fn ses_inbound_mx_host(region: &str) -> String {
+    let clean_region = region.trim();
+    let r = if clean_region.is_empty() {
+        "us-east-1"
+    } else {
+        clean_region
+    };
+    format!("inbound-smtp.{}.amazonaws.com", r)
+}
+
+pub fn ses_inbound_mx_value(region: &str) -> String {
+    format!("10 {}", ses_inbound_mx_host(region))
+}
+
+pub fn find_mx_record_in_list(
+    domain: &str,
+    zone_name: &str,
+    records: &[DnsRecordDto],
+) -> Option<String> {
+    let clean_domain = extract_domain_from_identity(domain).to_ascii_lowercase();
+    if clean_domain.is_empty() {
+        return None;
+    }
+    records.iter().find_map(|r| {
+        if r.record_type == "MX"
+            && full_record_name(&r.name, zone_name)
+                .trim_end_matches('.')
+                .to_ascii_lowercase()
+                == clean_domain
+        {
+            Some(r.value.clone())
+        } else {
+            None
+        }
+    })
+}
+
+pub fn check_ses_mx_record_in_list(
+    domain: &str,
+    zone_name: &str,
+    region: &str,
+    records: &[DnsRecordDto],
+) -> bool {
+    let expected_host = ses_inbound_mx_host(region).to_ascii_lowercase();
+    find_mx_record_in_list(domain, zone_name, records)
+        .map(|val| val.to_ascii_lowercase().contains(&expected_host))
+        .unwrap_or(false)
+}
+
 pub fn check_dmarc_record_in_list(
     domain: &str,
     zone_name: &str,
@@ -436,4 +485,54 @@ pub async fn upsert_ses_dns_records(
         .map_err(|e| format!("Failed publishing SES DNS records to Route53: {}", e))?;
 
     Ok(count)
+}
+
+pub async fn upsert_ses_mx_record(
+    zone_profile: &str,
+    zone_id: &str,
+    domain: &str,
+    region: &str,
+) -> Result<String, String> {
+    let config = build_sdk_config(zone_profile, Some("us-east-1")).await?;
+    let client = Client::new(&config);
+    let clean_domain = extract_domain_from_identity(domain);
+    if clean_domain.is_empty() {
+        return Err("Domain name cannot be empty.".to_string());
+    }
+
+    let mx_value = ses_inbound_mx_value(region);
+    let mx_fqdn = format!("{}.", clean_domain);
+    let mx_rr = ResourceRecord::builder()
+        .value(&mx_value)
+        .build()
+        .map_err(|e| format!("Invalid MX record value: {}", e))?;
+
+    let mx_rrs = ResourceRecordSet::builder()
+        .name(mx_fqdn)
+        .r#type(RrType::Mx)
+        .ttl(300)
+        .resource_records(mx_rr)
+        .build()
+        .map_err(|e| format!("Invalid MX record set: {}", e))?;
+
+    let mx_change = Change::builder()
+        .action(ChangeAction::Upsert)
+        .resource_record_set(mx_rrs)
+        .build()
+        .map_err(|e| format!("Invalid MX change: {}", e))?;
+
+    let batch = ChangeBatch::builder()
+        .changes(mx_change)
+        .build()
+        .map_err(|e| format!("Invalid MX change batch: {}", e))?;
+
+    client
+        .change_resource_record_sets()
+        .hosted_zone_id(zone_id)
+        .change_batch(batch)
+        .send()
+        .await
+        .map_err(|e| format!("Failed publishing SES inbound MX record to Route53: {}", e))?;
+
+    Ok(mx_value)
 }

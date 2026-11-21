@@ -32,9 +32,19 @@ import {
 import {
   loadSesIdentities,
   createSesIdentity as createSesIdentityService,
+  resendSesVerificationEmail,
   publishSesDkimToRoute53,
+  publishSesMxToRoute53,
   deleteSesIdentity as deleteSesIdentityService,
 } from './services/sesService.js';
+import {
+  listSesSenderKeys,
+  createSesSenderKey,
+  recreateSesSenderKey,
+  revokeSesSenderKey,
+  sendSesSmtpTestEmail,
+  getSesSmtpHost,
+} from './services/sesSmtpService.js';
 import { useKeyboardNavigation } from './hooks/useKeyboardNavigation.js';
 
 const EMPTY_ACCOUNT_FORM = {
@@ -119,6 +129,25 @@ const CLI = () => {
   const [showAddSesIdentity, setShowAddSesIdentity] = useState(false);
   const [sesIdentityInput, setSesIdentityInput] = useState('');
   const [showSesDkimModal, setShowSesDkimModal] = useState(false);
+  const [selectedSesIdentity, setSelectedSesIdentity] = useState(null);
+  const [sesSenderKeys, setSesSenderKeys] = useState([]);
+  const [selectedSesKeyIndex, setSelectedSesKeyIndex] = useState(0);
+  const [showAddSesKey, setShowAddSesKey] = useState(false);
+  const [sesKeyUserName, setSesKeyUserName] = useState('');
+  const [sesKeyConfirmAction, setSesKeyConfirmAction] = useState(null); // null | 'revoke' | 'recreate'
+  const [createdSesKeyResult, setCreatedSesKeyResult] = useState(null);
+  const [sesSessionPasswords, setSesSessionPasswords] = useState({});
+  const [showSmtpTestForm, setShowSmtpTestForm] = useState(false);
+  const [smtpTestFormData, setSmtpTestFormData] = useState({
+    smtpHost: '',
+    smtpPort: 587,
+    smtpUsername: '',
+    smtpPassword: '',
+    fromEmail: '',
+    toEmail: '',
+    subject: '',
+    body: '',
+  });
 
   // Shared state
   const [loading, setLoading] = useState(false);
@@ -185,6 +214,13 @@ const CLI = () => {
     }
   }, [selectedAccount, screen, selectedResource]);
 
+  // Load SES SMTP sender keys when entering ses-keys screen
+  useEffect(() => {
+    if (selectedAccount && selectedSesIdentity && screen === 'ses-keys') {
+      loadSesSenderKeysAndHandleError(selectedAccount, selectedSesIdentity.identityName);
+    }
+  }, [selectedAccount, selectedSesIdentity, screen]);
+
   // Reset state when switching resources
   useEffect(() => {
     if (selectedResource) {
@@ -215,6 +251,14 @@ const CLI = () => {
       setShowAddSesIdentity(false);
       setSesIdentityInput('');
       setShowSesDkimModal(false);
+      setSelectedSesIdentity(null);
+      setSesSenderKeys([]);
+      setSelectedSesKeyIndex(0);
+      setShowAddSesKey(false);
+      setSesKeyUserName('');
+      setSesKeyConfirmAction(null);
+      setCreatedSesKeyResult(null);
+      setShowSmtpTestForm(false);
       setSelectedRecordIndex(0);
       setSelectedRuleIndex(0);
       setSelectedAccountIndex(0);
@@ -797,6 +841,30 @@ const CLI = () => {
     }
   };
 
+  const resendSesVerification = async () => {
+    const target = sesIdentities[selectedSesIndex];
+    if (!selectedAccount || !target) return;
+    if (target.identityType !== 'EMAIL_ADDRESS') {
+      setError('Resend verification email is only available for email address identities.');
+      return;
+    }
+    if (target.verificationStatus === 'SUCCESS') {
+      setStatusMessage(`SES identity "${target.identityName}" is already verified.`);
+      return;
+    }
+    setLoading(true);
+    setError(null);
+    try {
+      const message = await resendSesVerificationEmail(selectedAccount, target.identityName);
+      setStatusMessage(message);
+      await loadSesIdentitiesAndHandleError(selectedAccount);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const publishSesDkim = async () => {
     const target = sesIdentities[selectedSesIndex];
     if (!selectedAccount || !target) return;
@@ -808,6 +876,30 @@ const CLI = () => {
         accounts,
         target.identityName,
         target.dkimTokens
+      );
+      setStatusMessage(message);
+      await loadSesIdentitiesAndHandleError(selectedAccount);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const publishSesMx = async () => {
+    const target = sesIdentities[selectedSesIndex];
+    if (!selectedAccount || !target) return;
+    if (target.identityType !== 'DOMAIN') {
+      setError('Inbound MX records can only be published for SES domain identities.');
+      return;
+    }
+    setLoading(true);
+    setError(null);
+    try {
+      const message = await publishSesMxToRoute53(
+        selectedAccount,
+        accounts,
+        target.identityName
       );
       setStatusMessage(message);
       await loadSesIdentitiesAndHandleError(selectedAccount);
@@ -836,6 +928,136 @@ const CLI = () => {
     }
   };
 
+  // Amazon SES SMTP Sender Keys & Integrated SMTP Tester
+  const loadSesSenderKeysAndHandleError = async (account, identityName) => {
+    setLoading(true);
+    setError(null);
+    try {
+      const keys = await listSesSenderKeys(account, identityName);
+      setSesSenderKeys(keys);
+      setSelectedSesKeyIndex((prev) => (keys.length === 0 ? 0 : Math.min(prev, keys.length - 1)));
+    } catch (err) {
+      setError(err.message);
+      setSesSenderKeys([]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const submitAddSesKey = async () => {
+    if (!selectedAccount || !selectedSesIdentity) return;
+    setLoading(true);
+    setError(null);
+    try {
+      const created = await createSesSenderKey(
+        selectedAccount,
+        selectedSesIdentity.identityName,
+        sesKeyUserName
+      );
+      setShowAddSesKey(false);
+      setSesKeyUserName('');
+      setSesSessionPasswords((prev) => ({
+        ...prev,
+        [created.smtpUsername]: created.smtpPassword,
+      }));
+      setCreatedSesKeyResult(created);
+      setStatusMessage(
+        `Created SMTP sender key "${created.userName}" (AmazonSesSendingAccess) for "${selectedSesIdentity.identityName}".`
+      );
+      await loadSesSenderKeysAndHandleError(selectedAccount, selectedSesIdentity.identityName);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const cancelAddSesKey = () => {
+    setShowAddSesKey(false);
+    setSesKeyUserName('');
+    setError(null);
+  };
+
+  const confirmSesKeyAction = async () => {
+    const target = sesSenderKeys[selectedSesKeyIndex];
+    if (!selectedAccount || !selectedSesIdentity || !target || !sesKeyConfirmAction) return;
+    const action = sesKeyConfirmAction;
+    setLoading(true);
+    setError(null);
+    try {
+      if (action === 'revoke') {
+        await revokeSesSenderKey(selectedAccount, target.userName);
+        setSesKeyConfirmAction(null);
+        setStatusMessage(`Revoked SMTP sender IAM user "${target.userName}".`);
+        await loadSesSenderKeysAndHandleError(selectedAccount, selectedSesIdentity.identityName);
+      } else if (action === 'recreate') {
+        const recreated = await recreateSesSenderKey(
+          selectedAccount,
+          selectedSesIdentity.identityName,
+          target.userName
+        );
+        setSesKeyConfirmAction(null);
+        setSesSessionPasswords((prev) => ({
+          ...prev,
+          [recreated.smtpUsername]: recreated.smtpPassword,
+        }));
+        setCreatedSesKeyResult(recreated);
+        setStatusMessage(`Recreated SMTP credentials for "${target.userName}".`);
+        await loadSesSenderKeysAndHandleError(selectedAccount, selectedSesIdentity.identityName);
+      }
+    } catch (err) {
+      setError(err.message);
+      setSesKeyConfirmAction(null);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const openSmtpTester = (overrideCred = null) => {
+    if (!selectedAccount || !selectedSesIdentity) return;
+    const region = selectedAccount.region || 'us-east-1';
+    const host = overrideCred?.smtpHost || getSesSmtpHost(region);
+    const port = overrideCred?.smtpPort || 587;
+    const highlighted = sesSenderKeys[selectedSesKeyIndex];
+    const keyId = overrideCred?.smtpUsername || highlighted?.accessKeys?.[0]?.accessKeyId || '';
+    const pass = overrideCred?.smtpPassword || sesSessionPasswords[keyId] || '';
+    const fromEmail = selectedSesIdentity.identityName;
+
+    setCreatedSesKeyResult(null);
+    setError(null);
+    setStatusMessage(null);
+    setSmtpTestFormData({
+      smtpHost: host,
+      smtpPort: port,
+      smtpUsername: keyId,
+      smtpPassword: pass,
+      fromEmail,
+      toEmail: fromEmail,
+      subject: `AWS SES SMTP Test — ${fromEmail}`,
+      body: `SMTP test email sent from ${fromEmail} via ${host}:${port}.`,
+    });
+    setShowSmtpTestForm(true);
+  };
+
+  const submitSmtpTest = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const msg = await sendSesSmtpTestEmail(smtpTestFormData);
+      setShowSmtpTestForm(false);
+      setStatusMessage(msg);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const cancelSmtpTest = () => {
+    setShowSmtpTestForm(false);
+    setError(null);
+  };
+
   // Determine which context we're in
   const getCurrentList = () => {
     if (screen === 'manage-accounts') return accounts;
@@ -843,6 +1065,7 @@ const CLI = () => {
     if (screen === 's3-objects') return objects;
     if (screen === 's3-keys') return bucketKeys;
     if (screen === 'ses-identities') return sesIdentities;
+    if (screen === 'ses-keys') return sesSenderKeys;
     if (screen === 'rules') return rules;
     return records;
   };
@@ -853,6 +1076,7 @@ const CLI = () => {
     if (screen === 's3-objects') return selectedObjectIndex;
     if (screen === 's3-keys') return selectedKeyIndex;
     if (screen === 'ses-identities') return selectedSesIndex;
+    if (screen === 'ses-keys') return selectedSesKeyIndex;
     if (screen === 'rules') return selectedRuleIndex;
     return selectedRecordIndex;
   };
@@ -865,20 +1089,23 @@ const CLI = () => {
     handleDeleteConfirm:
       screen === 's3-keys'
         ? confirmBucketKeyAction
-        : screen === 'ses-identities'
-          ? deleteSesIdentity
-          : screen === 'manage-accounts'
-            ? deleteAccount
-            : screen === 's3-buckets'
-              ? deleteBucket
-              : screen === 's3-objects'
-                ? deleteObject
-                : screen === 'rules'
-                  ? deleteRule
-                  : deleteRecord,
+        : screen === 'ses-keys'
+          ? confirmSesKeyAction
+          : screen === 'ses-identities'
+            ? deleteSesIdentity
+            : screen === 'manage-accounts'
+              ? deleteAccount
+              : screen === 's3-buckets'
+                ? deleteBucket
+                : screen === 's3-objects'
+                  ? deleteObject
+                  : screen === 'rules'
+                    ? deleteRule
+                    : deleteRecord,
     handleDeleteCancel: () => {
       setShowDeleteConfirm(false);
       setKeyConfirmAction(null);
+      setSesKeyConfirmAction(null);
     },
     handleAddRecord: (recordType) => {
       if (screen === 'manage-accounts') {
@@ -902,6 +1129,11 @@ const CLI = () => {
         setStatusMessage(null);
         setSesIdentityInput('');
         setShowAddSesIdentity(true);
+      } else if (screen === 'ses-keys') {
+        setError(null);
+        setStatusMessage(null);
+        setSesKeyUserName('');
+        setShowAddSesKey(true);
       } else if (screen === 'rules') {
         setRuleData({ protocol: 'tcp', fromPort: 80, toPort: 80, source: '0.0.0.0/0', description: '' });
         setShowAddRule(true);
@@ -969,11 +1201,50 @@ const CLI = () => {
         setError(null);
         setStatusMessage(null);
         setKeyConfirmAction('recreate');
+      } else if (screen === 'ses-keys' && sesSenderKeys[selectedSesKeyIndex]) {
+        setError(null);
+        setStatusMessage(null);
+        setSesKeyConfirmAction('recreate');
+      }
+    },
+    handleManageSesKeys: () => {
+      if (screen === 'ses-identities') {
+        const target = sesIdentities[selectedSesIndex];
+        if (!target) return;
+        if (target.identityType !== 'EMAIL_ADDRESS') {
+          setError('SMTP sender keys are managed per email address identity. Select an [EMAIL] row.');
+          return;
+        }
+        setSelectedSesIdentity(target);
+        setSesSenderKeys([]);
+        setSelectedSesKeyIndex(0);
+        setShowAddSesKey(false);
+        setSesKeyConfirmAction(null);
+        setCreatedSesKeyResult(null);
+        setShowSmtpTestForm(false);
+        setStatusMessage(null);
+        setError(null);
+        setScreen('ses-keys');
+      }
+    },
+    handleTestSesSmtp: () => {
+      if (screen === 'ses-keys') {
+        openSmtpTester();
       }
     },
     handlePublishSesDkim: () => {
       if (screen === 'ses-identities') {
         publishSesDkim();
+      }
+    },
+    handlePublishSesMx: () => {
+      if (screen === 'ses-identities') {
+        publishSesMx();
+      }
+    },
+    handleResendSesVerification: () => {
+      if (screen === 'ses-identities') {
+        resendSesVerification();
       }
     },
     handleViewSesDkim: () => {
@@ -997,6 +1268,13 @@ const CLI = () => {
         setKeyConfirmAction('revoke');
         return;
       }
+      if (screen === 'ses-keys') {
+        if (!sesSenderKeys[selectedSesKeyIndex]) return;
+        setError(null);
+        setStatusMessage(null);
+        setSesKeyConfirmAction('revoke');
+        return;
+      }
       setError(null);
       setStatusMessage(null);
       setShowDeleteConfirm(true);
@@ -1012,6 +1290,8 @@ const CLI = () => {
         setSelectedKeyIndex((prev) => Math.max(0, prev - 1));
       } else if (screen === 'ses-identities') {
         setSelectedSesIndex((prev) => Math.max(0, prev - 1));
+      } else if (screen === 'ses-keys') {
+        setSelectedSesKeyIndex((prev) => Math.max(0, prev - 1));
       } else if (screen === 'rules') {
         setSelectedRuleIndex(prev => Math.max(0, prev - 1));
       } else {
@@ -1029,6 +1309,8 @@ const CLI = () => {
         setSelectedKeyIndex((prev) => Math.min(bucketKeys.length - 1, prev + 1));
       } else if (screen === 'ses-identities') {
         setSelectedSesIndex((prev) => Math.min(sesIdentities.length - 1, prev + 1));
+      } else if (screen === 'ses-keys') {
+        setSelectedSesKeyIndex((prev) => Math.min(sesSenderKeys.length - 1, prev + 1));
       } else if (screen === 'rules') {
         setSelectedRuleIndex(prev => Math.min(rules.length - 1, prev + 1));
       } else {
@@ -1038,6 +1320,12 @@ const CLI = () => {
     handleEscape: () => {
       if (createdIamResult) {
         dismissCreatedIamResult();
+      } else if (createdSesKeyResult) {
+        setCreatedSesKeyResult(null);
+      } else if (showSmtpTestForm) {
+        cancelSmtpTest();
+      } else if (showAddSesKey) {
+        cancelAddSesKey();
       } else if (showSesDkimModal) {
         setShowSesDkimModal(false);
       } else if (addKeyRole) {
@@ -1056,6 +1344,17 @@ const CLI = () => {
         setShowAddRecord(false);
       } else if (showAddRule) {
         setShowAddRule(false);
+      } else if (screen === 'ses-keys') {
+        setScreen('ses-identities');
+        setSelectedSesIdentity(null);
+        setSesSenderKeys([]);
+        setSelectedSesKeyIndex(0);
+        setShowAddSesKey(false);
+        setSesKeyConfirmAction(null);
+        setCreatedSesKeyResult(null);
+        setShowSmtpTestForm(false);
+        setStatusMessage(null);
+        setError(null);
       } else if (screen === 's3-keys') {
         setScreen(keysReturnScreen || 's3-buckets');
         setBucketKeys([]);
@@ -1129,11 +1428,15 @@ const CLI = () => {
       showAddBucket ||
       showAddSesIdentity ||
       showSesDkimModal ||
+      showAddSesKey ||
+      showSmtpTestForm ||
       Boolean(accountFormMode) ||
       Boolean(objectFormMode) ||
       Boolean(addKeyRole) ||
-      Boolean(createdIamResult),
-    showDeleteConfirm: showDeleteConfirm || Boolean(keyConfirmAction),
+      Boolean(createdIamResult) ||
+      Boolean(createdSesKeyResult),
+    showDeleteConfirm:
+      showDeleteConfirm || Boolean(keyConfirmAction) || Boolean(sesKeyConfirmAction),
     records: currentRecords,
     selectedRecordIndex: currentIndex,
   };
@@ -1221,6 +1524,24 @@ const CLI = () => {
       showSesDkimModal={showSesDkimModal}
       setShowSesDkimModal={setShowSesDkimModal}
       publishSesDkim={publishSesDkim}
+      publishSesMx={publishSesMx}
+      selectedSesIdentity={selectedSesIdentity}
+      sesSenderKeys={sesSenderKeys}
+      selectedSesKeyIndex={selectedSesKeyIndex}
+      showAddSesKey={showAddSesKey}
+      sesKeyUserName={sesKeyUserName}
+      setSesKeyUserName={setSesKeyUserName}
+      submitAddSesKey={submitAddSesKey}
+      cancelAddSesKey={cancelAddSesKey}
+      sesKeyConfirmAction={sesKeyConfirmAction}
+      createdSesKeyResult={createdSesKeyResult}
+      dismissCreatedSesKeyResult={() => setCreatedSesKeyResult(null)}
+      openSmtpTesterWithCred={(cred) => openSmtpTester(cred)}
+      showSmtpTestForm={showSmtpTestForm}
+      smtpTestFormData={smtpTestFormData}
+      setSmtpTestFormData={setSmtpTestFormData}
+      submitSmtpTest={submitSmtpTest}
+      cancelSmtpTest={cancelSmtpTest}
     />
   );
 };

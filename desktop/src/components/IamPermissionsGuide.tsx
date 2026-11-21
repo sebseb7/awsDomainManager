@@ -12,21 +12,64 @@ export const IamPermissionsGuide: React.FC<Props> = ({ defaultExpanded = false }
   const [includeS3, setIncludeS3] = useState(true);
   const [includeIamBucketUsers, setIncludeIamBucketUsers] = useState(true);
   const [includeSes, setIncludeSes] = useState(true);
+  const [includeSesSmtpUsers, setIncludeSesSmtpUsers] = useState(true);
   const [readOnly, setReadOnly] = useState(false);
   const [copied, setCopied] = useState(false);
 
   const policyJson = useMemo(() => {
     const statements: Record<string, unknown>[] = [];
+    const wildcardActions: string[] = [];
+
+    if (includeRoute53) {
+      wildcardActions.push('route53:ListHostedZones');
+    }
+
+    if (includeEc2) {
+      wildcardActions.push(
+        ...(readOnly
+          ? ['ec2:DescribeSecurityGroups', 'ec2:DescribeSecurityGroupRules']
+          : [
+              'ec2:DescribeSecurityGroups',
+              'ec2:DescribeSecurityGroupRules',
+              'ec2:AuthorizeSecurityGroupIngress',
+              'ec2:RevokeSecurityGroupIngress',
+            ])
+      );
+    }
+
+    if (includeS3) {
+      wildcardActions.push('s3:ListAllMyBuckets');
+    }
+
+    if ((includeIamBucketUsers || includeSesSmtpUsers) && !readOnly) {
+      wildcardActions.push('iam:ListUsers');
+    }
+
+    if (includeSes) {
+      wildcardActions.push(
+        ...(readOnly
+          ? ['ses:ListEmailIdentities', 'ses:GetEmailIdentity']
+          : [
+              'ses:ListEmailIdentities',
+              'ses:GetEmailIdentity',
+              'ses:CreateEmailIdentity',
+              'ses:DeleteEmailIdentity',
+            ])
+      );
+    }
+
+    if (wildcardActions.length > 0) {
+      statements.push({
+        Sid: 'GlobalAndListActions',
+        Effect: 'Allow',
+        Action: wildcardActions,
+        Resource: '*',
+      });
+    }
 
     if (includeRoute53) {
       statements.push({
-        Sid: 'Route53ListHostedZones',
-        Effect: 'Allow',
-        Action: ['route53:ListHostedZones'],
-        Resource: '*',
-      });
-      statements.push({
-        Sid: 'Route53ManageRecords',
+        Sid: 'Route53Records',
         Effect: 'Allow',
         Action: readOnly
           ? ['route53:ListResourceRecordSets']
@@ -35,31 +78,9 @@ export const IamPermissionsGuide: React.FC<Props> = ({ defaultExpanded = false }
       });
     }
 
-    if (includeEc2) {
-      statements.push({
-        Sid: 'EC2SecurityGroupRules',
-        Effect: 'Allow',
-        Action: readOnly
-          ? ['ec2:DescribeSecurityGroups', 'ec2:DescribeSecurityGroupRules']
-          : [
-              'ec2:DescribeSecurityGroups',
-              'ec2:DescribeSecurityGroupRules',
-              'ec2:AuthorizeSecurityGroupIngress',
-              'ec2:RevokeSecurityGroupIngress',
-            ],
-        Resource: '*',
-      });
-    }
-
     if (includeS3) {
       statements.push({
-        Sid: 'S3ListBuckets',
-        Effect: 'Allow',
-        Action: ['s3:ListAllMyBuckets'],
-        Resource: '*',
-      });
-      statements.push({
-        Sid: 'S3ManageBucketsAndObjects',
+        Sid: 'S3BucketsAndObjects',
         Effect: 'Allow',
         Action: readOnly
           ? ['s3:ListBucket', 's3:GetBucketLocation', 's3:GetObject']
@@ -76,15 +97,17 @@ export const IamPermissionsGuide: React.FC<Props> = ({ defaultExpanded = false }
       });
     }
 
+    const scopedIamResources: string[] = [];
     if (includeIamBucketUsers && !readOnly) {
+      scopedIamResources.push('arn:aws:iam::*:user/s3-bucket-users/*');
+    }
+    if (includeSesSmtpUsers && !readOnly) {
+      scopedIamResources.push('arn:aws:iam::*:user/ses-smtp-users/*');
+    }
+
+    if (scopedIamResources.length > 0) {
       statements.push({
-        Sid: 'IAMListBucketUsers',
-        Effect: 'Allow',
-        Action: ['iam:ListUsers'],
-        Resource: '*',
-      });
-      statements.push({
-        Sid: 'IAMManageBucketUsersOnly',
+        Sid: 'IAMScopedUsersOnly',
         Effect: 'Allow',
         Action: [
           'iam:GetUser',
@@ -100,38 +123,7 @@ export const IamPermissionsGuide: React.FC<Props> = ({ defaultExpanded = false }
           'iam:DeleteAccessKey',
           'iam:GetAccessKeyLastUsed',
         ],
-        Resource: 'arn:aws:iam::*:user/s3-bucket-users/*',
-      });
-    }
-
-    if (includeSes) {
-      statements.push({
-        Sid: 'SESListIdentities',
-        Effect: 'Allow',
-        Action: ['ses:ListEmailIdentities', 'ses:ListIdentities'],
-        Resource: '*',
-      });
-      statements.push({
-        Sid: 'SESManageIdentities',
-        Effect: 'Allow',
-        Action: readOnly
-          ? [
-              'ses:GetEmailIdentity',
-              'ses:GetIdentityVerificationAttributes',
-              'ses:GetIdentityDkimAttributes',
-            ]
-          : [
-              'ses:GetEmailIdentity',
-              'ses:GetIdentityVerificationAttributes',
-              'ses:GetIdentityDkimAttributes',
-              'ses:CreateEmailIdentity',
-              'ses:DeleteEmailIdentity',
-              'ses:VerifyDomainIdentity',
-              'ses:VerifyDomainDkim',
-              'ses:VerifyEmailIdentity',
-              'ses:DeleteIdentity',
-            ],
-        Resource: '*',
+        Resource: scopedIamResources.length === 1 ? scopedIamResources[0] : scopedIamResources,
       });
     }
 
@@ -143,7 +135,20 @@ export const IamPermissionsGuide: React.FC<Props> = ({ defaultExpanded = false }
       null,
       2
     );
-  }, [includeRoute53, includeEc2, includeS3, includeIamBucketUsers, includeSes, readOnly]);
+  }, [
+    includeRoute53,
+    includeEc2,
+    includeS3,
+    includeIamBucketUsers,
+    includeSes,
+    includeSesSmtpUsers,
+    readOnly,
+  ]);
+
+  const inlinePolicyLength = useMemo(
+    () => policyJson.replace(/\s+/g, '').length,
+    [policyJson]
+  );
 
   const handleCopy = async () => {
     await navigator.clipboard.writeText(policyJson);
@@ -221,6 +226,15 @@ export const IamPermissionsGuide: React.FC<Props> = ({ defaultExpanded = false }
               />
               <span>Amazon SES Identities</span>
             </label>
+            <label className="perm-check">
+              <input
+                type="checkbox"
+                checked={includeSesSmtpUsers && !readOnly}
+                disabled={readOnly}
+                onChange={(e) => setIncludeSesSmtpUsers(e.target.checked)}
+              />
+              <span>SES SMTP Sender Keys</span>
+            </label>
             <label className="perm-check perm-check-readonly">
               <input
                 type="checkbox"
@@ -233,7 +247,10 @@ export const IamPermissionsGuide: React.FC<Props> = ({ defaultExpanded = false }
 
           <div className="code-block-wrap">
             <div className="code-block-header">
-              <span>IAM Inline / Managed Policy JSON</span>
+              <span>
+                IAM Inline / Managed Policy JSON ({inlinePolicyLength.toLocaleString()} / 2,048
+                non-whitespace chars · {policyJson.length.toLocaleString()} total)
+              </span>
               <button type="button" className="btn btn-sm" onClick={handleCopy}>
                 {copied ? <Check size={13} /> : <Copy size={13} />}
                 {copied ? 'Copied' : 'Copy JSON'}
@@ -244,10 +261,10 @@ export const IamPermissionsGuide: React.FC<Props> = ({ defaultExpanded = false }
 
           <div className="permissions-notes">
             <div>
-              <strong>IAM bucket-user isolation:</strong> Optional per-bucket IAM users are placed
-              under <code className="mono">/s3-bucket-users/</code> (
-              <code className="mono">arn:aws:iam::&lt;account-id&gt;:user/s3-bucket-users/*</code>
-              ), so this management account cannot modify any other IAM users.
+              <strong>IAM user isolation:</strong> Per-bucket S3 users are placed under{' '}
+              <code className="mono">/s3-bucket-users/</code> and per-email SES SMTP sender users
+              under <code className="mono">/ses-smtp-users/</code>, so this management account
+              cannot modify any other IAM users.
             </div>
             <div>
               <strong>Further scoping:</strong> Replace{' '}

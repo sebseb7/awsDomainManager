@@ -5,6 +5,7 @@ mod profiles;
 mod route53;
 mod s3;
 mod ses;
+mod ses_smtp;
 
 use ec2::{AddRuleInput, InboundRuleDto, SecurityGroupDto};
 use iam::{BucketIamUserDto, CreatedIamUserDto};
@@ -12,6 +13,7 @@ use profiles::{AccountInput, AwsProfile};
 use route53::{DnsRecordDto, HostedZoneDto, RecordInput};
 use s3::{BucketDto, S3ObjectDto};
 use ses::SesIdentityDto;
+use ses_smtp::{CreatedSesSenderKeyDto, SesSenderKeyUserDto, SmtpTestSendInput};
 
 #[tauri::command]
 fn list_profiles() -> Result<Vec<AwsProfile>, String> {
@@ -214,6 +216,14 @@ async fn create_ses_identity(profile: String, identity_name: String) -> Result<S
 }
 
 #[tauri::command]
+async fn resend_ses_verification_email(
+    profile: String,
+    identity_name: String,
+) -> Result<String, String> {
+    ses::resend_ses_verification_email(&profile, &identity_name).await
+}
+
+#[tauri::command]
 async fn publish_ses_dkim_records(
     profile: String,
     domain: String,
@@ -223,8 +233,49 @@ async fn publish_ses_dkim_records(
 }
 
 #[tauri::command]
+async fn publish_ses_mx_record(profile: String, domain: String) -> Result<String, String> {
+    ses::publish_ses_mx_record(&profile, &domain).await
+}
+
+#[tauri::command]
 async fn delete_ses_identity(profile: String, identity_name: String) -> Result<(), String> {
     ses::delete_ses_identity(&profile, &identity_name).await
+}
+
+#[tauri::command]
+async fn list_ses_sender_keys(
+    profile: String,
+    identity_name: String,
+) -> Result<Vec<SesSenderKeyUserDto>, String> {
+    ses_smtp::list_ses_sender_keys(&profile, &identity_name).await
+}
+
+#[tauri::command]
+async fn create_ses_sender_key(
+    profile: String,
+    identity_name: String,
+    custom_user_name: String,
+) -> Result<CreatedSesSenderKeyDto, String> {
+    ses_smtp::create_ses_sender_key(&profile, &identity_name, &custom_user_name).await
+}
+
+#[tauri::command]
+async fn recreate_ses_sender_key(
+    profile: String,
+    identity_name: String,
+    user_name: String,
+) -> Result<CreatedSesSenderKeyDto, String> {
+    ses_smtp::recreate_ses_sender_key(&profile, &identity_name, &user_name).await
+}
+
+#[tauri::command]
+async fn revoke_ses_sender_key(profile: String, user_name: String) -> Result<(), String> {
+    ses_smtp::revoke_ses_sender_key(&profile, &user_name).await
+}
+
+#[tauri::command]
+async fn test_ses_smtp_send(input: SmtpTestSendInput) -> Result<String, String> {
+    ses_smtp::test_ses_smtp_send(input).await
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -259,8 +310,15 @@ pub fn run() {
             revoke_bucket_iam_user,
             list_ses_identities,
             create_ses_identity,
+            resend_ses_verification_email,
             publish_ses_dkim_records,
-            delete_ses_identity
+            publish_ses_mx_record,
+            delete_ses_identity,
+            list_ses_sender_keys,
+            create_ses_sender_key,
+            recreate_ses_sender_key,
+            revoke_ses_sender_key,
+            test_ses_smtp_send
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

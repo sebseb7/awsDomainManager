@@ -106,10 +106,48 @@ export interface SesIdentity {
   dkimRecordsPublished?: boolean;
   dmarcRecordPublished?: boolean;
   dnsRecordsPublished?: boolean;
+  mxRecordPublished?: boolean;
+  mxRecordValue?: string;
+  mxExistingValue?: string | null;
   sendingEnabled: boolean;
   matchedZoneId?: string | null;
   matchedZoneName?: string | null;
   matchedZoneProfile?: string | null;
+}
+
+export interface SesSenderKeyUser {
+  identityName: string;
+  userName: string;
+  region: string;
+  smtpHost: string;
+  smtpPort: number;
+  policyName: string;
+  createdAt: string;
+  lastUsedAt?: string;
+  accessKeys: IamAccessKeyMeta[];
+}
+
+export interface CreatedSesSenderKey {
+  identityName: string;
+  userName: string;
+  region: string;
+  smtpHost: string;
+  smtpPort: number;
+  smtpUsername: string;
+  smtpPassword: string;
+  accessKeyId: string;
+  secretAccessKey: string;
+}
+
+export interface SmtpTestSendInput {
+  smtpHost: string;
+  smtpPort: number;
+  smtpUsername: string;
+  smtpPassword: string;
+  fromEmail: string;
+  toEmail: string;
+  subject: string;
+  body: string;
 }
 
 export type NavSection = 'route53' | 'ec2' | 's3' | 'ses' | 'accounts';

@@ -1,8 +1,9 @@
 use crate::aws_client::build_sdk_config;
 use crate::route53::{
-    check_dkim_records_in_list, check_dmarc_record_in_list, extract_domain_from_identity,
-    list_dns_records, load_all_zones_across_profiles, match_domain_in_zones,
-    upsert_ses_dns_records, DnsRecordDto,
+    check_dkim_records_in_list, check_dmarc_record_in_list, check_ses_mx_record_in_list,
+    extract_domain_from_identity, find_mx_record_in_list, list_dns_records,
+    load_all_zones_across_profiles, match_domain_in_zones, ses_inbound_mx_value,
+    upsert_ses_dns_records, upsert_ses_mx_record, DnsRecordDto,
 };
 use aws_sdk_sesv2::error::{DisplayErrorContext, ProvideErrorMetadata};
 use aws_sdk_sesv2::Client;
@@ -30,6 +31,9 @@ pub struct SesIdentityDto {
     pub dkim_records_published: bool,
     pub dmarc_record_published: bool,
     pub dns_records_published: bool,
+    pub mx_record_published: bool,
+    pub mx_record_value: String,
+    pub mx_existing_value: Option<String>,
     pub sending_enabled: bool,
     pub matched_zone_id: Option<String>,
     pub matched_zone_name: Option<String>,
@@ -47,6 +51,11 @@ fn format_type_label(identity_type: &str) -> &'static str {
 
 pub async fn list_ses_identities(profile: &str) -> Result<Vec<SesIdentityDto>, String> {
     let config = build_sdk_config(profile, None).await?;
+    let ses_region = config
+        .region()
+        .map(|r| r.as_ref().to_string())
+        .unwrap_or_else(|| "us-east-1".to_string());
+    let mx_record_value = ses_inbound_mx_value(&ses_region);
     let client = Client::new(&config);
 
     let mut raw_identities = Vec::new();
@@ -115,6 +124,8 @@ pub async fn list_ses_identities(profile: &str) -> Result<Vec<SesIdentityDto>, S
 
         let mut dkim_records_published = identity_type != "DOMAIN" || dkim_status == "SUCCESS";
         let mut dmarc_record_published = false;
+        let mut mx_record_published = false;
+        let mut mx_existing_value: Option<String> = None;
 
         if let Some(mz) = &matched_zone {
             let records = if let Some(cached) = zone_records_cache.get(&mz.zone_id) {
@@ -136,6 +147,11 @@ pub async fn list_ses_identities(profile: &str) -> Result<Vec<SesIdentityDto>, S
                 );
             }
             dmarc_record_published = check_dmarc_record_in_list(&domain, &mz.zone_name, &records);
+            if identity_type == "DOMAIN" {
+                mx_existing_value = find_mx_record_in_list(&domain, &mz.zone_name, &records);
+                mx_record_published =
+                    check_ses_mx_record_in_list(&domain, &mz.zone_name, &ses_region, &records);
+            }
         }
 
         let dns_records_published = if identity_type == "DOMAIN" {
@@ -156,6 +172,9 @@ pub async fn list_ses_identities(profile: &str) -> Result<Vec<SesIdentityDto>, S
             dkim_records_published,
             dmarc_record_published,
             dns_records_published,
+            mx_record_published,
+            mx_record_value: mx_record_value.clone(),
+            mx_existing_value,
             sending_enabled: item.sending_enabled(),
             matched_zone_id: matched_zone.as_ref().map(|z| z.zone_id.clone()),
             matched_zone_name: matched_zone.as_ref().map(|z| z.zone_name.clone()),
@@ -215,6 +234,12 @@ pub async fn create_ses_identity(profile: &str, identity_name: &str) -> Result<S
         }
     }
 
+    let email_hint = if trimmed.contains('@') {
+        " Check the inbox for the verification email and click the provided link."
+    } else {
+        ""
+    };
+
     let all_zones = load_all_zones_across_profiles(profile).await;
     if let Some(matched) = match_domain_in_zones(&domain, &all_zones) {
         let existing_records =
@@ -234,18 +259,104 @@ pub async fn create_ses_identity(profile: &str, identity_name: &str) -> Result<S
             .await
             {
                 return Ok(format!(
-                    "Created SES identity \"{}\" and automatically published {} DNS record{} (DKIM/DMARC) to Route53 zone \"{}\" ({}).",
+                    "Created SES identity \"{}\" and automatically published {} DNS record{} (DKIM/DMARC) to Route53 zone \"{}\" ({}).{}",
                     trimmed,
                     count,
                     if count == 1 { "" } else { "s" },
                     matched.zone_name,
-                    matched.profile
+                    matched.profile,
+                    email_hint
                 ));
             }
         }
     }
 
-    Ok(format!("Created SES identity \"{}\".", trimmed))
+    Ok(format!("Created SES identity \"{}\".{}", trimmed, email_hint))
+}
+
+pub async fn resend_ses_verification_email(
+    profile: &str,
+    identity_name: &str,
+) -> Result<String, String> {
+    let trimmed = identity_name.trim();
+    if trimmed.is_empty() || !trimmed.contains('@') {
+        return Err(
+            "Verification emails can only be resent for email address identities.".to_string(),
+        );
+    }
+
+    let config = build_sdk_config(profile, None).await?;
+    let client = Client::new(&config);
+
+    let mut config_set_name: Option<String> = None;
+    let mut tags = Vec::new();
+
+    if let Ok(detail) = client
+        .get_email_identity()
+        .email_identity(trimmed)
+        .send()
+        .await
+    {
+        if detail.identity_type().map(|t| t.as_str()) == Some("DOMAIN") {
+            return Err(
+                "Verification emails can only be resent for email address identities.".to_string(),
+            );
+        }
+        if detail.verification_status().map(|s| s.as_str()) == Some("SUCCESS") {
+            return Ok(format!("SES identity \"{}\" is already verified.", trimmed));
+        }
+        config_set_name = detail.configuration_set_name().map(|s| s.to_string());
+        tags = detail.tags().to_vec();
+    }
+
+    if let Err(err) = client
+        .delete_email_identity()
+        .email_identity(trimmed)
+        .send()
+        .await
+    {
+        if err.code() != Some("NotFoundException") {
+            return Err(format!(
+                "Failed to reset pending SES identity \"{}\": {}",
+                trimmed,
+                format_aws_err(&err)
+            ));
+        }
+    }
+
+    let mut last_err: Option<String> = None;
+    for attempt in 0..2 {
+        let mut req = client.create_email_identity().email_identity(trimmed);
+        if let Some(ref cs) = config_set_name {
+            req = req.configuration_set_name(cs);
+        }
+        if !tags.is_empty() {
+            req = req.set_tags(Some(tags.clone()));
+        }
+
+        match req.send().await {
+            Ok(_) => {
+                return Ok(format!(
+                    "Verification email resent to \"{}\". Check the inbox and click the provided link.",
+                    trimmed
+                ));
+            }
+            Err(err) => {
+                if attempt == 0 && err.code() == Some("AlreadyExistsException") {
+                    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                    continue;
+                }
+                last_err = Some(format_aws_err(&err));
+                break;
+            }
+        }
+    }
+
+    Err(format!(
+        "Failed to resend verification email to \"{}\": {}",
+        trimmed,
+        last_err.unwrap_or_else(|| "Unknown error".to_string())
+    ))
 }
 
 pub async fn publish_ses_dkim_records(
@@ -308,6 +419,40 @@ pub async fn publish_ses_dkim_records(
         clean_domain,
         matched.zone_name,
         matched.profile
+    ))
+}
+
+pub async fn publish_ses_mx_record(profile: &str, domain: &str) -> Result<String, String> {
+    let trimmed = domain.trim();
+    if trimmed.is_empty() || trimmed.contains('@') {
+        return Err("Inbound MX records can only be published for SES domain identities.".to_string());
+    }
+    let clean_domain = extract_domain_from_identity(trimmed);
+    let config = build_sdk_config(profile, None).await?;
+    let ses_region = config
+        .region()
+        .map(|r| r.as_ref().to_string())
+        .unwrap_or_else(|| "us-east-1".to_string());
+
+    let all_zones = load_all_zones_across_profiles(profile).await;
+    let matched = match_domain_in_zones(&clean_domain, &all_zones).ok_or_else(|| {
+        format!(
+            "No matching Route53 hosted zone found for \"{}\" in any configured AWS account.",
+            clean_domain
+        )
+    })?;
+
+    let mx_value = upsert_ses_mx_record(
+        &matched.profile,
+        &matched.zone_id,
+        &clean_domain,
+        &ses_region,
+    )
+    .await?;
+
+    Ok(format!(
+        "Published SES inbound MX record ({}) for \"{}\" to Route53 zone \"{}\" ({}).",
+        mx_value, clean_domain, matched.zone_name, matched.profile
     ))
 }
 

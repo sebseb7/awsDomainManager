@@ -37,6 +37,11 @@ const AddSesIdentityForm = ({ identityInput, setIdentityInput, onSubmit, onCance
           If the domain matches a Route53 zone in your accounts, its DKIM CNAME and DMARC TXT (_dmarc) records are published automatically.
         </Text>
       </Box>
+      <Box>
+        <Text dimColor>
+          For email addresses, check the inbox for the Amazon SES verification email and click the provided link.
+        </Text>
+      </Box>
       <Box marginTop={1}>
         <Text dimColor>Press Enter to create identity, or Esc to cancel</Text>
       </Box>
@@ -44,7 +49,8 @@ const AddSesIdentityForm = ({ identityInput, setIdentityInput, onSubmit, onCance
   );
 };
 
-const DkimRecordsModal = ({ identity, onPublish, onClose }) => {
+const DkimRecordsModal = ({ identity, region, onPublish, onPublishMx, onClose }) => {
+  const isDomain = identity.identityType === 'DOMAIN';
   useInput((input, key) => {
     if (key.escape || key.return) {
       onClose?.();
@@ -52,16 +58,22 @@ const DkimRecordsModal = ({ identity, onPublish, onClose }) => {
     }
     if (input === 'p') {
       onPublish?.();
+      return;
+    }
+    if (input === 'm' && isDomain) {
+      onPublishMx?.();
     }
   });
 
   const cleanDomain = getIdentityDomain(identity);
   const tokens = identity.dkimTokens || [];
+  const mxValue =
+    identity.mxRecordValue || `10 inbound-smtp.${region || 'us-east-1'}.amazonaws.com`;
 
   return (
     <Box flexDirection="column" borderStyle="round" borderColor="cyan" padding={1}>
       <Text bold color="cyan">
-        SES DNS Records (DKIM &amp; DMARC) for &quot;{identity.identityName}&quot;
+        SES DNS Records ({isDomain ? 'DKIM, DMARC & Inbound MX' : 'DKIM & DMARC'}) for &quot;{identity.identityName}&quot;
         {identity.matchedZoneName
           ? ` (Route53 zone: ${identity.matchedZoneName} on ${identity.matchedZoneProfile})`
           : ''}
@@ -84,10 +96,29 @@ const DkimRecordsModal = ({ identity, onPublish, onClose }) => {
           <Text color="cyan">{`_dmarc.${cleanDomain}`.padEnd(56)}</Text>
           <Text>&quot;v=DMARC1; p=none;&quot;</Text>
         </Box>
+        {isDomain && (
+          <Box>
+            <Text color="blue">{'MX'.padEnd(7)}</Text>
+            <Text color="cyan">{cleanDomain.padEnd(56)}</Text>
+            <Text>
+              {mxValue}
+              {identity.mxRecordPublished ? ' [Published]' : ''}
+            </Text>
+          </Box>
+        )}
       </Box>
+      {isDomain && identity.mxExistingValue && !identity.mxRecordPublished && (
+        <Box marginTop={1}>
+          <Text color="yellow">
+            Note: Existing MX record ({identity.mxExistingValue}) will be replaced if you publish SES MX.
+          </Text>
+        </Box>
+      )}
       <Box marginTop={1}>
         <Text dimColor>
-          Press &apos;p&apos; to publish missing DKIM/DMARC records to Route53, or Enter/Esc to close
+          {isDomain
+            ? "Press 'p' to publish DKIM/DMARC, 'm' to publish inbound MX to Route53, or Enter/Esc to close"
+            : "Press 'p' to publish missing DKIM/DMARC records to Route53, or Enter/Esc to close"}
         </Text>
       </Box>
     </Box>
@@ -107,6 +138,7 @@ const SesScreen = ({
   showSesDkimModal,
   setShowSesDkimModal,
   publishSesDkim,
+  publishSesMx,
   showDeleteConfirm,
   statusMessage,
 }) => {
@@ -114,6 +146,11 @@ const SesScreen = ({
   const emailCount = sesIdentities.filter((i) => i.identityType === 'EMAIL_ADDRESS').length;
   const highlighted = sesIdentities[selectedSesIndex];
   const isModalOpen = showAddSesIdentity || showDeleteConfirm || showSesDkimModal;
+  const unverifiedEmails = sesIdentities.filter(
+    (i) => i.identityType === 'EMAIL_ADDRESS' && i.verificationStatus !== 'SUCCESS'
+  );
+  const highlightedNeedsEmailVerification =
+    highlighted?.identityType === 'EMAIL_ADDRESS' && highlighted?.verificationStatus !== 'SUCCESS';
 
   return (
     <Box flexDirection="column" marginBottom={1}>
@@ -139,12 +176,47 @@ const SesScreen = ({
         </Box>
       )}
 
+      {!isModalOpen && !loading && unverifiedEmails.length > 0 && (
+        <Box
+          flexDirection="column"
+          borderStyle="round"
+          borderColor="yellow"
+          paddingX={1}
+          marginBottom={1}
+        >
+          <Text bold color="yellow">
+            [!] Action required — Email verification pending
+          </Text>
+          {highlightedNeedsEmailVerification ? (
+            <Text>
+              Check inbox for <Text color="cyan">{highlighted.identityName}</Text> and click the
+              verification link from Amazon SES. Press <Text bold color="yellow">&apos;r&apos;</Text>{' '}
+              to resend.
+            </Text>
+          ) : (
+            <Text>
+              Check inbox for{' '}
+              <Text color="cyan">
+                {unverifiedEmails.map((e) => e.identityName).join(', ')}
+              </Text>{' '}
+              and click the verification link from Amazon SES (select and press{' '}
+              <Text bold color="yellow">&apos;r&apos;</Text> to resend).
+            </Text>
+          )}
+        </Box>
+      )}
+
       {showSesDkimModal && highlighted ? (
         <DkimRecordsModal
           identity={highlighted}
+          region={selectedAccount.region || 'us-east-1'}
           onPublish={() => {
             setShowSesDkimModal(false);
             publishSesDkim?.();
+          }}
+          onPublishMx={() => {
+            setShowSesDkimModal(false);
+            publishSesMx?.();
           }}
           onClose={() => setShowSesDkimModal(false)}
         />
@@ -261,7 +333,7 @@ const SesScreen = ({
         <Box marginTop={1}>
           <Text dimColor>
             {sesIdentities.length > 0
-              ? 'Use ↑/↓ arrows, p to publish DKIM/DMARC to Route53, v/Enter to view DNS records, a to add, d to delete, or Esc to go back'
+              ? '↑/↓ | k keys | r resend | p publish R53 | m publish MX | v/Enter DNS | a add | d del | Esc'
               : 'Press a to add a domain or email identity, or Esc to go back'}
           </Text>
         </Box>

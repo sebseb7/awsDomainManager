@@ -1,6 +1,6 @@
 import { useInput } from 'ink';
 
-const LIST_SCREENS = ['records', 'rules', 'manage-accounts', 's3-buckets', 's3-objects', 's3-keys', 'ses-identities'];
+const LIST_SCREENS = ['records', 'rules', 'manage-accounts', 's3-buckets', 's3-objects', 's3-keys', 'ses-identities', 'ses-keys'];
 
 /**
  * Custom hook for handling global keyboard navigation
@@ -26,7 +26,11 @@ export const useKeyboardNavigation = (navigationState, navigationActions) => {
     handleManageKeys,
     handleRecreateKey,
     handlePublishSesDkim,
+    handlePublishSesMx,
     handleViewSesDkim,
+    handleResendSesVerification,
+    handleManageSesKeys,
+    handleTestSesSmtp,
     handleDeleteRecord,
     handleUpArrow,
     handleDownArrow,
@@ -53,10 +57,10 @@ export const useKeyboardNavigation = (navigationState, navigationActions) => {
       return;
     }
 
-    // Handle 'a' to add a rule, AWS account, S3 bucket, or SES identity
+    // Handle 'a' to add a rule, AWS account, S3 bucket, SES identity, or SES SMTP sender key
     if (
       input === 'a' &&
-      (screen === 'rules' || screen === 'manage-accounts' || screen === 's3-buckets' || screen === 'ses-identities') &&
+      (screen === 'rules' || screen === 'manage-accounts' || screen === 's3-buckets' || screen === 'ses-identities' || screen === 'ses-keys') &&
       !showAddRecord
     ) {
       handleAddRecord();
@@ -89,14 +93,42 @@ export const useKeyboardNavigation = (navigationState, navigationActions) => {
       }
     }
 
-    // Handle 'p' (publish DKIM CNAMEs to Route53) and 'v'/Enter (view DKIM records) on SES screen
+    // Handle 'k' (manage SMTP sender keys), 'r' (resend verification email), 'p' (publish DKIM/DMARC), 'm' (publish inbound MX), and 'v'/Enter (view DNS records) on SES screen
     if (screen === 'ses-identities' && !showAddRecord && records.length > 0) {
+      if (input === 'k') {
+        handleManageSesKeys?.();
+        return;
+      }
+      if (input === 'r') {
+        handleResendSesVerification?.();
+        return;
+      }
       if (input === 'p') {
         handlePublishSesDkim?.();
         return;
       }
+      if (input === 'm') {
+        handlePublishSesMx?.();
+        return;
+      }
       if (input === 'v' || key.return) {
         handleViewSesDkim?.();
+        return;
+      }
+    }
+
+    // Handle 'n' (add key), 't' (test SMTP send), 'r' (recreate key) on SES sender keys screen
+    if (screen === 'ses-keys' && !showAddRecord) {
+      if (input === 'n') {
+        handleAddRecord();
+        return;
+      }
+      if (input === 't') {
+        handleTestSesSmtp?.();
+        return;
+      }
+      if (input === 'r' && records.length > 0) {
+        handleRecreateKey?.();
         return;
       }
     }

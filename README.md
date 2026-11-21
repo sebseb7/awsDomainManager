@@ -58,11 +58,13 @@ npm i . && npm run build && npm run start
 - **Route53 DNS Records** — Manage A/AAAA/CNAME/MX/TXT/NS records across hosted zones
 - **EC2 Security Groups** — View, add, and delete inbound rules for security groups
 - **S3 Buckets** — List, create (with optional scoped Put-Only and/or Read-Only IAM user creation — never delete — plus a scannable QR code of bucket & credentials), and delete S3 buckets; manage per-bucket IAM keys (revoke/recreate read & write keys, multiple read keys allowed, max 1 write key per bucket); and browse prefixes/folders to upload, download, or delete objects
-- **Amazon SES Identities** — List, filter, add, and delete domain and email address identities with verification, DKIM, and sending status
-- **AWS Account Management** — Add, edit, and remove AWS credential profiles (`~/.aws/credentials` and `~/.aws/config`) directly from the tool
-- Terminal UI with keyboard navigation
-- Support for AWS credential profiles
-- Interactive resource creation
+- **Amazon SES Identities & SMTP** — List, filter, add, and delete domain and email address identities with verification, DKIM, DMARC, inbound MX, and sending status:
+  - Auto-detects matching Route53 hosted zones across all configured AWS accounts and publishes Easy DKIM `CNAME` and DMARC `TXT` (`_dmarc.<domain>`) records automatically or on demand
+  - Offers optional region-aware SES inbound `MX` (`10 inbound-smtp.<region>.amazonaws.com`) publishing for domains (with overwrite warning if an existing MX record is present)
+  - Highlights unverified email identities with an **Action required** inbox verification banner and one-click **Resend** verification email action
+  - Manages multiple per-email **SMTP Sender Keys** (`AmazonSesSendingAccess` IAM users under `/ses-smtp-users/`, scoped to `ses:FromAddress`) with SigV4-derived SMTP passwords, rotation, revocation, and an integrated **SMTP Send Tester** (`lettre` in Desktop, `nodemailer` in TUI)
+- **AWS Account Management** — Add, edit, and remove AWS credential profiles (`~/.aws/credentials` and `~/.aws/config`) directly from the tool, with an interactive **Minimum IAM Permissions** policy generator
+- Terminal UI with keyboard navigation and native Desktop App (Tauri v2)
 
 ## Navigation
 
@@ -80,8 +82,14 @@ Resource Selection
   │
   ├── S3 Buckets
   │     ├── Select account
-  │     ├── View/create/delete buckets (a to create, d to delete, Enter to browse)
-  │     └── Browse/manage bucket objects (Enter to open folder, u to upload, g to download, d to delete)
+  │     ├── View/create/delete buckets (a to create, k for IAM keys, d to delete, Enter to browse)
+  │     ├── Manage per-bucket IAM keys (w write key, n/a read key, r recreate, d revoke)
+  │     └── Browse/manage bucket objects (Enter to open folder, u to upload, g to download, k for IAM keys, d to delete)
+  │
+  ├── Amazon SES Identities
+  │     ├── Select account
+  │     ├── View/add/delete domains & emails (a add, v/Enter DNS, p publish DKIM/DMARC, m publish MX, r resend verification, k SMTP keys, d delete)
+  │     └── Manage per-email SMTP Sender Keys (a/n add key, t SMTP send tester, r recreate, d revoke)
   │
   └── Manage AWS Accounts
         └── View/add/edit/remove AWS profiles (a to add, e/Enter to edit, d to remove)
@@ -89,46 +97,60 @@ Resource Selection
 
 ### Key Bindings
 
-| Key | Route53 Records | EC2 Rules | S3 Buckets | S3 Objects | Manage AWS Accounts |
-|-----|----------------|-----------|------------|------------|---------------------|
-| `↑/↓` | Navigate list | Navigate list | Navigate list | Navigate list | Navigate list |
-| `Enter` | Select | Select | Browse bucket | Open folder | Edit selected account |
-| `a` | Add A record | Add inbound rule | Create bucket | — | Add AWS account |
-| `A` | Add AAAA record | — | — | — | — |
-| `c` | Add CNAME record | — | — | — | — |
-| `e` | — | — | — | — | Edit selected account |
-| `g` | — | — | — | Download file | — |
-| `m` | Add MX record | — | — | — | — |
-| `t` | Add TXT record | — | — | — | — |
-| `n` | Add NS record | — | — | — | — |
-| `u` | — | — | — | Upload file | — |
-| `d` | Delete selected | Delete selected rule | Delete bucket | Delete object | Remove selected account |
-| `Esc` | Go back | Go back | Go back | Up folder / back | Go back |
+| Key | Route53 Records | EC2 Rules | S3 Buckets / Objects | Amazon SES Identities | SES SMTP Keys | Manage AWS Accounts |
+|-----|----------------|-----------|----------------------|-----------------------|---------------|---------------------|
+| `↑/↓` | Navigate list | Navigate list | Navigate list | Navigate list | Navigate list | Navigate list |
+| `Enter` | Select | Select | Browse bucket / folder | View DNS records | — | Edit selected account |
+| `a` | Add A record | Add inbound rule | Create bucket | Add domain or email | Add sender key | Add AWS account |
+| `A` | Add AAAA record | — | — | — | — | — |
+| `c` | Add CNAME record | — | — | — | — | — |
+| `e` | — | — | — | — | — | Edit selected account |
+| `g` | — | — | Download file (objects) | — | — | — |
+| `k` | — | — | Manage bucket IAM keys | Manage email SMTP keys | — | — |
+| `m` | Add MX record | — | — | Publish inbound MX (domains) | — | — |
+| `n` | Add NS record | — | Add read key (S3 keys) | — | Add sender key | — |
+| `p` | — | — | — | Publish DKIM/DMARC to R53 | — | — |
+| `r` | — | — | Recreate key (S3 keys) | Resend verification email | Recreate SMTP key | — |
+| `t` | Add TXT record | — | — | — | Open SMTP send tester | — |
+| `u` | — | — | Upload file (objects) | — | — | — |
+| `v` | — | — | — | View DNS records | — | — |
+| `d` | Delete selected | Delete selected rule | Delete / revoke | Delete identity | Revoke sender key | Remove selected account |
+| `Esc` | Go back | Go back | Up folder / back | Go back | Back to SES identities | Go back |
 
 ## Requirements
 
 - Node.js 18+
 - AWS credentials configured in `~/.aws/credentials` (or add them via **Manage AWS Accounts**)
-- AWS region configured in `~/.aws/config` (EC2 and S3 are region-specific)
+- AWS region configured in `~/.aws/config` (EC2, S3, and SES are region-specific)
 
 ## Minimum IAM Permissions (Least Privilege)
 
-Create a dedicated IAM user for this tool instead of using root or `AdministratorAccess` credentials. Attach only the statements below for the features you plan to use (you can omit any statement for a service you do not use):
+Create a dedicated IAM user for this tool instead of using root or `AdministratorAccess` credentials. The optimized policy below fits well under AWS's **2,048-character** inline user policy limit (~1,191 non-whitespace characters) — omit any actions or statements for services you do not use (or customize interactively in the Desktop App's **AWS Accounts** view):
 
 ```json
 {
   "Version": "2012-10-17",
   "Statement": [
     {
-      "Sid": "Route53ListHostedZones",
+      "Sid": "GlobalAndListActions",
       "Effect": "Allow",
       "Action": [
-        "route53:ListHostedZones"
+        "route53:ListHostedZones",
+        "ec2:DescribeSecurityGroups",
+        "ec2:DescribeSecurityGroupRules",
+        "ec2:AuthorizeSecurityGroupIngress",
+        "ec2:RevokeSecurityGroupIngress",
+        "s3:ListAllMyBuckets",
+        "iam:ListUsers",
+        "ses:ListEmailIdentities",
+        "ses:GetEmailIdentity",
+        "ses:CreateEmailIdentity",
+        "ses:DeleteEmailIdentity"
       ],
       "Resource": "*"
     },
     {
-      "Sid": "Route53ManageRecords",
+      "Sid": "Route53Records",
       "Effect": "Allow",
       "Action": [
         "route53:ListResourceRecordSets",
@@ -137,26 +159,7 @@ Create a dedicated IAM user for this tool instead of using root or `Administrato
       "Resource": "arn:aws:route53:::hostedzone/*"
     },
     {
-      "Sid": "EC2SecurityGroupRules",
-      "Effect": "Allow",
-      "Action": [
-        "ec2:DescribeSecurityGroups",
-        "ec2:DescribeSecurityGroupRules",
-        "ec2:AuthorizeSecurityGroupIngress",
-        "ec2:RevokeSecurityGroupIngress"
-      ],
-      "Resource": "*"
-    },
-    {
-      "Sid": "S3ListBuckets",
-      "Effect": "Allow",
-      "Action": [
-        "s3:ListAllMyBuckets"
-      ],
-      "Resource": "*"
-    },
-    {
-      "Sid": "S3ManageBucketsAndObjects",
+      "Sid": "S3BucketsAndObjects",
       "Effect": "Allow",
       "Action": [
         "s3:CreateBucket",
@@ -173,15 +176,7 @@ Create a dedicated IAM user for this tool instead of using root or `Administrato
       ]
     },
     {
-      "Sid": "IAMListBucketUsers",
-      "Effect": "Allow",
-      "Action": [
-        "iam:ListUsers"
-      ],
-      "Resource": "*"
-    },
-    {
-      "Sid": "IAMManageBucketUsersOnly",
+      "Sid": "IAMScopedUsersOnly",
       "Effect": "Allow",
       "Action": [
         "iam:GetUser",
@@ -197,32 +192,10 @@ Create a dedicated IAM user for this tool instead of using root or `Administrato
         "iam:DeleteAccessKey",
         "iam:GetAccessKeyLastUsed"
       ],
-      "Resource": "arn:aws:iam::*:user/s3-bucket-users/*"
-    },
-    {
-      "Sid": "SESListIdentities",
-      "Effect": "Allow",
-      "Action": [
-        "ses:ListEmailIdentities",
-        "ses:ListIdentities"
-      ],
-      "Resource": "*"
-    },
-    {
-      "Sid": "SESManageIdentities",
-      "Effect": "Allow",
-      "Action": [
-        "ses:GetEmailIdentity",
-        "ses:GetIdentityVerificationAttributes",
-        "ses:GetIdentityDkimAttributes",
-        "ses:CreateEmailIdentity",
-        "ses:DeleteEmailIdentity",
-        "ses:VerifyDomainIdentity",
-        "ses:VerifyDomainDkim",
-        "ses:VerifyEmailIdentity",
-        "ses:DeleteIdentity"
-      ],
-      "Resource": "*"
+      "Resource": [
+        "arn:aws:iam::*:user/s3-bucket-users/*",
+        "arn:aws:iam::*:user/ses-smtp-users/*"
+      ]
     }
   ]
 }
@@ -230,6 +203,6 @@ Create a dedicated IAM user for this tool instead of using root or `Administrato
 
 ### Locking down permissions further
 
-- **IAM bucket-user isolation**: All optional IAM users created when creating an S3 bucket are placed under the `/s3-bucket-users/` path (`arn:aws:iam::<account-id>:user/s3-bucket-users/<username>`). The `IAMCreateBucketUsersOnly` statement above ensures this tool's user cannot touch any other IAM users in your account. Omit this statement completely if you don't create per-bucket IAM users.
+- **IAM user isolation**: Optional per-bucket S3 users are placed under `/s3-bucket-users/` (`arn:aws:iam::<account-id>:user/s3-bucket-users/*`) and per-email SES SMTP sender users under `/ses-smtp-users/` (`arn:aws:iam::<account-id>:user/ses-smtp-users/*`). The `IAMScopedUsersOnly` statement ensures this tool's management user cannot modify any other IAM users in your account. Omit it (and `iam:ListUsers`) if you don't manage per-bucket or per-email IAM keys.
 - **Scoped Route53 / S3 resources**: Replace `arn:aws:route53:::hostedzone/*` with specific hosted zone IDs, or `arn:aws:s3:::*` with specific bucket name patterns (e.g. `arn:aws:s3:::my-prefix-*`).
-- **Read-only usage**: Remove `ChangeResourceRecordSets`, `AuthorizeSecurityGroupIngress`, `RevokeSecurityGroupIngress`, `CreateBucket`, `DeleteBucket`, `PutObject`, `DeleteObject`, and the `IAMCreateBucketUsersOnly` statement if you only need read/view access.
+- **Read-only usage**: Remove write actions (`ChangeResourceRecordSets`, `AuthorizeSecurityGroupIngress`, `RevokeSecurityGroupIngress`, `CreateBucket`, `DeleteBucket`, `PutObject`, `DeleteObject`, `CreateEmailIdentity`, `DeleteEmailIdentity`, `iam:ListUsers`) and the `IAMScopedUsersOnly` statement if you only need read/view access.

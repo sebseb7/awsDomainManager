@@ -27,3 +27,7 @@ aws-sdk-ec2 = "1"
 aws-sdk-s3 = "1"
 aws-sdk-iam = "1"
 aws-sdk-sesv2 = "1"
+base64 = "0.23"
+hmac = "0.13"
+sha2 = "0.11"
+lettre = { version = "0.11", default-features = false, features = ["smtp-transport", "builder", "hostname", "tokio1", "tokio1-rustls-tls"] }

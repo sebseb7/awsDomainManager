@@ -11,6 +11,7 @@ import {
   DUMMY_BUCKET_IAM_USERS,
   DUMMY_RECREATED_CREDENTIAL,
   DUMMY_SES_IDENTITIES,
+  DUMMY_SES_SENDER_KEYS,
 } from './fixtures/dummyData.mjs';
 
 mkdirSync('docs', { recursive: true });
@@ -28,9 +29,11 @@ test.beforeEach(async ({ page }) => {
       iamUsers,
       recreatedCred,
       sesIdentities,
+      sesSenderKeys,
     }) => {
       let currentUsers = structuredClone(iamUsers);
       let currentSes = structuredClone(sesIdentities);
+      let currentSesKeys = structuredClone(sesSenderKeys);
 
       window.__TAURI_INTERNALS__ = {
         transformCallback: () => 0,
@@ -137,8 +140,83 @@ test.beforeEach(async ({ page }) => {
               currentSes = currentSes.filter((i) => i.identityName !== args.identityName);
               return null;
             }
+            case 'resend_ses_verification_email': {
+              return `Verification email resent to "${args.identityName}". Check the inbox and click the provided link.`;
+            }
             case 'publish_ses_dkim_records': {
               return `Published 3 DKIM CNAME records for "${args.domain}" to Route53 zone "example.com." (prod-aws).`;
+            }
+            case 'publish_ses_mx_record': {
+              currentSes = currentSes.map((i) =>
+                i.identityName === args.domain
+                  ? {
+                      ...i,
+                      mxRecordPublished: true,
+                      mxExistingValue: '10 inbound-smtp.eu-central-1.amazonaws.com',
+                    }
+                  : i
+              );
+              return `Published SES inbound MX record (10 inbound-smtp.eu-central-1.amazonaws.com) for "${args.domain}" to Route53 zone "example.com." (prod-aws).`;
+            }
+            case 'list_ses_sender_keys': {
+              return currentSesKeys.filter((k) => k.identityName === args.identityName);
+            }
+            case 'create_ses_sender_key': {
+              const name =
+                args.customUserName?.trim() ||
+                `ses-alerts-example-com-${currentSesKeys.length + 1}`;
+              const keyId = `AKIASMTPNEW000${currentSesKeys.length + 1}EXMP`;
+              const created = {
+                identityName: args.identityName,
+                userName: name,
+                region: 'eu-central-1',
+                smtpHost: 'email-smtp.eu-central-1.amazonaws.com',
+                smtpPort: 587,
+                smtpUsername: keyId,
+                smtpPassword: 'BNExampleSigV4DerivedSmtpPassword000000000000=',
+                accessKeyId: keyId,
+                secretAccessKey: 'exampleSecretKey000000000000000000000000',
+              };
+              currentSesKeys.push({
+                identityName: args.identityName,
+                userName: name,
+                region: 'eu-central-1',
+                smtpHost: created.smtpHost,
+                smtpPort: 587,
+                policyName: 'AmazonSesSendingAccess',
+                createdAt: '2026-11-21T12:00:00Z',
+                lastUsedAt: 'Never',
+                accessKeys: [
+                  {
+                    accessKeyId: keyId,
+                    status: 'Active',
+                    createDate: '2026-11-21T12:00:00Z',
+                    lastUsedDate: 'Never',
+                  },
+                ],
+              });
+              return created;
+            }
+            case 'recreate_ses_sender_key': {
+              return {
+                identityName: args.identityName,
+                userName: args.userName,
+                region: 'eu-central-1',
+                smtpHost: 'email-smtp.eu-central-1.amazonaws.com',
+                smtpPort: 587,
+                smtpUsername: 'AKIASMTPROTATED99EXMP',
+                smtpPassword: 'BNRotatedSigV4DerivedSmtpPassword00000000000=',
+                accessKeyId: 'AKIASMTPROTATED99EXMP',
+                secretAccessKey: 'rotatedSecretKey000000000000000000000000',
+              };
+            }
+            case 'revoke_ses_sender_key': {
+              currentSesKeys = currentSesKeys.filter((k) => k.userName !== args.userName);
+              return null;
+            }
+            case 'test_ses_smtp_send': {
+              const inp = args.input || {};
+              return `SMTP test email sent from "${inp.fromEmail}" to "${inp.toEmail}" via ${inp.smtpHost}:${inp.smtpPort} (250 Ok 01070193example).`;
             }
             default:
               return [];
@@ -157,6 +235,7 @@ test.beforeEach(async ({ page }) => {
       iamUsers: DUMMY_BUCKET_IAM_USERS,
       recreatedCred: DUMMY_RECREATED_CREDENTIAL,
       sesIdentities: DUMMY_SES_IDENTITIES,
+      sesSenderKeys: DUMMY_SES_SENDER_KEYS,
     }
   );
 });
@@ -210,13 +289,71 @@ test('Desktop App: Route53, EC2, S3 IAM Keys (multiple read / single write), QR 
   await expect(page.getByText('Domains (3)')).toBeVisible();
   await expect(page.getByText('Email Addresses (3)')).toBeVisible();
   await expect(page.getByText('alerts@example.com')).toBeVisible();
+  await expect(page.getByText('Action required')).toBeVisible();
+  const pendingEmailRow = page.locator('tr', { hasText: 'dev-team@staging.example.com' });
+  await expect(pendingEmailRow.getByText('Check inbox')).toBeVisible();
+  await expect(pendingEmailRow.getByRole('button', { name: /Resend/i })).toBeVisible();
+  const verifiedEmailRow = page.locator('tr', { hasText: 'alerts@example.com' });
+  await expect(verifiedEmailRow.getByRole('button', { name: /Resend/i })).toHaveCount(0);
+  await expect(verifiedEmailRow.getByRole('button', { name: /Publish MX/i })).toHaveCount(0);
+  const mailDomainRow = page.locator('tr', { hasText: 'mail.example.com' });
+  await expect(mailDomainRow.getByRole('button', { name: /Publish MX/i })).toHaveCount(0);
+  const stagingDomainRow = page.locator('tr', { hasText: 'staging.example.com' }).first();
+  await expect(stagingDomainRow.getByRole('button', { name: /Publish MX/i })).toBeVisible();
   await page.screenshot({ path: 'docs/desktop-ses.png' });
+
+  // Test resending verification email for pending email identity
+  await pendingEmailRow.getByRole('button', { name: /Resend/i }).click();
+  await expect(
+    page.getByText('Verification email resent to "dev-team@staging.example.com".')
+  ).toBeVisible();
+
+  // Test publishing SES inbound MX record directly (no existing MX) and with overwrite confirmation (existing MX)
+  await stagingDomainRow.getByRole('button', { name: /Publish MX/i }).click();
+  await expect(
+    page.getByText('Published SES inbound MX record (10 inbound-smtp.eu-central-1.amazonaws.com)')
+  ).toBeVisible();
+  await expect(stagingDomainRow.getByRole('button', { name: /Publish MX/i })).toHaveCount(0);
+
+  const rootDomainRow = page.locator('tr', { hasText: /^example\.com/ });
+  await rootDomainRow.getByRole('button', { name: /Publish MX/i }).click();
+  await expect(page.getByText('Replace Existing MX Record?')).toBeVisible();
+  await expect(page.getByText('10 mail.example.com.')).toBeVisible();
+  await page.getByRole('button', { name: 'Cancel' }).click();
+
+  // 5b. SES Email SMTP Sender Keys (AmazonSesSendingAccess) & Integrated SMTP Send Tester
+  await verifiedEmailRow.getByRole('button', { name: /Keys/i }).click();
+  await expect(page.getByText('AmazonSesSendingAccess')).toBeVisible();
+  await expect(page.getByText('ses-alerts-example-com')).toBeVisible();
+  await expect(page.getByText('ses-alerts-ci-notifier')).toBeVisible();
+
+  // Add a 3rd sender key for the same email (multiple allowed) -> opens credentials + QR modal -> test SMTP send
+  await page.getByRole('button', { name: /Add Sender Key/i }).click();
+  await page.getByRole('button', { name: /Create Key/i }).click();
+  await expect(page.getByText('SMTP Sender Key Created — alerts@example.com')).toBeVisible();
+  await expect(page.getByText('BNExampleSigV4DerivedSmtpPassword000000000000=')).toBeVisible();
+  await expect(page.locator('img[alt="SES SMTP Credentials QR Code"]')).toBeVisible();
+  await expect(
+    page.getByText(/pos420settings.*backupemailreceiver, reconciliationemailreceiver/)
+  ).toBeVisible();
+  await page.getByRole('button', { name: /Test SMTP Send/i }).click();
+  await expect(page.getByRole('button', { name: /Send Test Email/i })).toBeVisible();
+  await page.getByRole('button', { name: /Send Test Email/i }).click();
+  await expect(
+    page.getByText('250 Ok 01070193example').first()
+  ).toBeVisible();
+  await page.getByRole('button', { name: 'Close' }).click();
 
   // 6. AWS Accounts & IAM Permissions Guide
   await page.getByRole('button', { name: /AWS Accounts/i }).click();
   await expect(page.getByText('prod-aws')).toBeVisible();
   await page.getByRole('button', { name: /Minimum IAM Permissions/i }).click();
-  await expect(page.getByText('IAMManageBucketUsersOnly')).toBeVisible();
-  await expect(page.getByText('SESManageIdentities')).toBeVisible();
+  await expect(page.getByText('IAMScopedUsersOnly')).toBeVisible();
+  await expect(page.getByText('arn:aws:iam::*:user/s3-bucket-users/*')).toBeVisible();
+  await expect(page.getByText('arn:aws:iam::*:user/ses-smtp-users/*')).toBeVisible();
+  await expect(page.getByText('ses:CreateEmailIdentity')).toBeVisible();
+  const policyText = await page.locator('pre.code-block').innerText();
+  expect(policyText.length).toBeLessThanOrEqual(2048);
+  expect(policyText.replace(/\s+/g, '').length).toBeLessThanOrEqual(2048);
   await page.screenshot({ path: 'docs/desktop-accounts.png' });
 });

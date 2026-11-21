@@ -28,6 +28,7 @@
     "@aws-sdk/credential-provider-ini": "^3.973.31",
     "ink": "^8.0.0",
     "ink-text-input": "^6.0.0",
+    "nodemailer": "^10.6.1",
     "qrcode": "^1.5.4",
     "react": "^19.3.1"
   },

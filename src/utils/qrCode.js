@@ -28,6 +28,40 @@ export const buildBucketQrPayload = ({
 };
 
 /**
+ * Build a compact JSON payload for SES SMTP sender credentials QR codes.
+ * @param {Object} params
+ * @param {string} params.host
+ * @param {number} [params.port=587]
+ * @param {string} params.user
+ * @param {string} params.password
+ * @param {string} params.sender
+ * @param {string} [params.backupReceiver]
+ * @param {string} [params.reconciliationReceiver]
+ * @returns {string}
+ */
+export const buildSmtpQrPayload = ({
+  host,
+  port = 587,
+  user,
+  password,
+  sender,
+  backupReceiver,
+  reconciliationReceiver,
+}) => {
+  const payload = {
+    pos420settings: 1,
+    smtphost: host,
+    smtpport: String(Number(port) || 587),
+    smtpuser: user,
+    smtppassword: password,
+    emailsender: sender,
+    backupemailreceiver: backupReceiver || sender,
+    reconciliationemailreceiver: reconciliationReceiver || sender,
+  };
+  return JSON.stringify(payload);
+};
+
+/**
  * Render a QR code into compact Unicode half-block terminal lines.
  * Intended to be displayed with black foreground on white background so
  * cameras can scan it reliably on both dark and light terminal themes.

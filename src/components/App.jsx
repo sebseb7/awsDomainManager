@@ -11,6 +11,7 @@ import BucketScreen from './screens/BucketScreen.jsx';
 import BucketObjectsScreen from './screens/BucketObjectsScreen.jsx';
 import BucketKeysScreen from './screens/BucketKeysScreen.jsx';
 import SesScreen from './screens/SesScreen.jsx';
+import SesSenderKeysScreen from './screens/SesSenderKeysScreen.jsx';
 
 const getTitle = (selectedResource) => {
   if (!selectedResource) return 'AWS Domain Manager';
@@ -101,6 +102,24 @@ const App = (props) => {
     showSesDkimModal,
     setShowSesDkimModal,
     publishSesDkim,
+    publishSesMx,
+    selectedSesIdentity,
+    sesSenderKeys,
+    selectedSesKeyIndex,
+    showAddSesKey,
+    sesKeyUserName,
+    setSesKeyUserName,
+    submitAddSesKey,
+    cancelAddSesKey,
+    sesKeyConfirmAction,
+    createdSesKeyResult,
+    dismissCreatedSesKeyResult,
+    openSmtpTesterWithCred,
+    showSmtpTestForm,
+    smtpTestFormData,
+    setSmtpTestFormData,
+    submitSmtpTest,
+    cancelSmtpTest,
   } = props;
 
   const renderScreen = () => {
@@ -277,7 +296,34 @@ const App = (props) => {
             showSesDkimModal={showSesDkimModal}
             setShowSesDkimModal={setShowSesDkimModal}
             publishSesDkim={publishSesDkim}
+            publishSesMx={publishSesMx}
             showDeleteConfirm={showDeleteConfirm}
+            statusMessage={statusMessage}
+          />
+        );
+
+      case 'ses-keys':
+        return (
+          <SesSenderKeysScreen
+            selectedAccount={selectedAccount}
+            selectedSesIdentity={selectedSesIdentity}
+            sesSenderKeys={sesSenderKeys}
+            loading={loading}
+            selectedSesKeyIndex={selectedSesKeyIndex}
+            showAddSesKey={showAddSesKey}
+            sesKeyUserName={sesKeyUserName}
+            setSesKeyUserName={setSesKeyUserName}
+            submitAddSesKey={submitAddSesKey}
+            cancelAddSesKey={cancelAddSesKey}
+            sesKeyConfirmAction={sesKeyConfirmAction}
+            createdSesKeyResult={createdSesKeyResult}
+            dismissCreatedSesKeyResult={dismissCreatedSesKeyResult}
+            openSmtpTesterWithCred={openSmtpTesterWithCred}
+            showSmtpTestForm={showSmtpTestForm}
+            smtpTestFormData={smtpTestFormData}
+            setSmtpTestFormData={setSmtpTestFormData}
+            submitSmtpTest={submitSmtpTest}
+            cancelSmtpTest={cancelSmtpTest}
             statusMessage={statusMessage}
           />
         );
