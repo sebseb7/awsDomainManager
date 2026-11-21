@@ -1,5 +1,8 @@
 # AWS Domain Manager
 
+[![CI Build](https://github.com/sebseb7/awsDomainManager/actions/workflows/ci.yml/badge.svg)](https://github.com/sebseb7/awsDomainManager/actions/workflows/ci.yml)
+[![Release Desktop App](https://github.com/sebseb7/awsDomainManager/actions/workflows/release.yml/badge.svg)](https://github.com/sebseb7/awsDomainManager/actions/workflows/release.yml)
+
 A terminal-based UI tool built with React and Ink for managing AWS resources across multiple accounts.
 
 ## Usage
