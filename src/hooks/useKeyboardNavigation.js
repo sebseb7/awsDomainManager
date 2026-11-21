@@ -1,6 +1,6 @@
 import { useInput } from 'ink';
 
-const LIST_SCREENS = ['records', 'rules', 'manage-accounts', 's3-buckets', 's3-objects', 's3-keys', 'ses-identities', 'ses-keys'];
+const LIST_SCREENS = ['records', 'rules', 'manage-accounts', 's3-buckets', 's3-objects', 's3-keys', 'ses-identities', 'ses-keys', 'ec2-instances'];
 
 /**
  * Custom hook for handling global keyboard navigation
@@ -31,6 +31,15 @@ export const useKeyboardNavigation = (navigationState, navigationActions) => {
     handleResendSesVerification,
     handleManageSesKeys,
     handleTestSesSmtp,
+    handleToggleEc2Lock,
+    handleRebootEc2Instance,
+    handleStartStopEc2Instance,
+    handleViewEc2Details,
+    handleAllocateEip,
+    handleAssociateEip,
+    handleDisassociateEip,
+    handleReleaseEip,
+    handleTabEc2Section,
     handleDeleteRecord,
     handleUpArrow,
     handleDownArrow,
@@ -129,6 +138,46 @@ export const useKeyboardNavigation = (navigationState, navigationActions) => {
       }
       if (input === 'r' && records.length > 0) {
         handleRecreateKey?.();
+        return;
+      }
+    }
+
+    // Handle EC2 Instances & Elastic IPs screen keys
+    if (screen === 'ec2-instances' && !showAddRecord) {
+      if (key.tab) {
+        handleTabEc2Section?.();
+        return;
+      }
+      if (input === 'l' && records.length > 0) {
+        handleToggleEc2Lock?.();
+        return;
+      }
+      if (input === 'r' && records.length > 0) {
+        handleRebootEc2Instance?.();
+        return;
+      }
+      if (input === 's' && records.length > 0) {
+        handleStartStopEc2Instance?.();
+        return;
+      }
+      if ((input === 'v' || key.return) && records.length > 0) {
+        handleViewEc2Details?.();
+        return;
+      }
+      if (input === 'n') {
+        handleAllocateEip?.();
+        return;
+      }
+      if (input === 'a' && records.length > 0) {
+        handleAssociateEip?.();
+        return;
+      }
+      if (input === 'u' && records.length > 0) {
+        handleDisassociateEip?.();
+        return;
+      }
+      if (input === 'd' && records.length > 0) {
+        handleReleaseEip?.();
         return;
       }
     }

@@ -1,7 +1,8 @@
 import React, { useEffect, useState } from 'react';
-import { Cloud, Database, Globe, KeyRound, Mail, Shield, X } from 'lucide-react';
+import { Cloud, Cpu, Database, Globe, KeyRound, Mail, Shield, X } from 'lucide-react';
 import { api } from './api';
 import { AccountsView } from './components/AccountsView';
+import { Ec2InstancesView } from './components/Ec2InstancesView';
 import { Ec2View } from './components/Ec2View';
 import { Route53View } from './components/Route53View';
 import { S3View } from './components/S3View';
@@ -10,6 +11,7 @@ import type { AwsProfile, NavSection } from './types';
 
 const NAV_ITEMS: { id: NavSection; label: string; icon: React.ReactNode }[] = [
   { id: 'route53', label: 'Route53 DNS', icon: <Globe size={16} /> },
+  { id: 'ec2-instances', label: 'EC2 Instances & EIPs', icon: <Cpu size={16} /> },
   { id: 'ec2', label: 'EC2 Security Groups', icon: <Shield size={16} /> },
   { id: 's3', label: 'S3 Buckets', icon: <Database size={16} /> },
   { id: 'ses', label: 'Amazon SES', icon: <Mail size={16} /> },
@@ -18,6 +20,7 @@ const NAV_ITEMS: { id: NavSection; label: string; icon: React.ReactNode }[] = [
 
 const TITLES: Record<NavSection, string> = {
   route53: 'Route53 Hosted Zones & DNS Records',
+  'ec2-instances': 'EC2 Instances & Elastic IPs',
   ec2: 'EC2 Security Groups',
   s3: 'S3 Buckets & Objects',
   ses: 'Amazon SES Identities (Domains & Email Addresses)',
@@ -81,7 +84,7 @@ export function App() {
           </div>
           <div>
             <div className="brand-title">AWS Domain Manager</div>
-            <div className="brand-sub">Desktop v1.3.0</div>
+            <div className="brand-sub">Desktop v2.4.0</div>
           </div>
         </div>
 
@@ -184,6 +187,8 @@ export function App() {
             </div>
           ) : section === 'route53' ? (
             <Route53View account={activeAccount} onError={showError} onSuccess={showSuccess} />
+          ) : section === 'ec2-instances' ? (
+            <Ec2InstancesView account={activeAccount} onError={showError} onSuccess={showSuccess} />
           ) : section === 'ec2' ? (
             <Ec2View account={activeAccount} onError={showError} onSuccess={showSuccess} />
           ) : section === 'ses' ? (

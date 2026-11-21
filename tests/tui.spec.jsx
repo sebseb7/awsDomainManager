@@ -11,6 +11,8 @@ import {
   DUMMY_PROFILES,
   DUMMY_HOSTED_ZONES,
   DUMMY_DNS_RECORDS,
+  DUMMY_EC2_INSTANCES,
+  DUMMY_ELASTIC_IPS,
   DUMMY_BUCKETS,
   DUMMY_BUCKET_IAM_USERS,
   DUMMY_RECREATED_CREDENTIAL,
@@ -128,6 +130,22 @@ const BASE_TUI_PROPS = {
   setSmtpTestFormData: () => {},
   submitSmtpTest: () => {},
   cancelSmtpTest: () => {},
+  ec2Instances: DUMMY_EC2_INSTANCES,
+  elasticIps: DUMMY_ELASTIC_IPS,
+  selectedEc2Index: 0,
+  showEc2DetailsModal: false,
+  setShowEc2DetailsModal: () => {},
+  showAllocateEipModal: false,
+  setShowAllocateEipModal: () => {},
+  newEipName: '',
+  setNewEipName: () => {},
+  submitAllocateEip: () => {},
+  showAssociateEipModal: false,
+  setShowAssociateEipModal: () => {},
+  associateInstanceIdx: 0,
+  setAssociateInstanceIdx: () => {},
+  submitAssociateEip: () => {},
+  ec2ConfirmAction: null,
 };
 
 test('TUI: Route53 DNS Records screenshot', async ({ page }) => {
@@ -150,6 +168,39 @@ test('TUI: Route53 DNS Records screenshot', async ({ page }) => {
     ansi,
     'docs/tui-route53.png',
     'aws-domain-manager — Route53 DNS Records'
+  );
+});
+
+test('TUI: EC2 Instances & Elastic IPs (State, IPs, Reboot Lock & EIPs) screenshot', async ({
+  page,
+}) => {
+  const ansi = await renderInkToAnsi(
+    <App
+      {...BASE_TUI_PROPS}
+      screen="ec2-instances"
+      selectedResource={{ id: 'ec2-instances', name: 'EC2 Instances & Elastic IPs' }}
+      selectedEc2Index={0}
+    />,
+    { columns: 126, rows: 26 }
+  );
+
+  const plain = stripAnsi(ansi);
+  expect(plain).toContain('EC2 Instances & Elastic IPs Manager');
+  expect(plain).toContain('Running: 3');
+  expect(plain).toContain('Stopped: 1');
+  expect(plain).toContain('Reboot Locked: 2');
+  expect(plain).toContain('prod-web-01');
+  expect(plain).toContain('3.120.45.10 [EIP]');
+  expect(plain).toContain('[LOCKED]');
+  expect(plain).toContain('spare-failover-eip');
+  expect(plain).toContain('52.59.210.77');
+  expect(plain).toContain('UNASSOCIATED');
+
+  await screenshotAnsiTerminal(
+    page,
+    ansi,
+    'docs/tui-ec2-instances.png',
+    'aws-domain-manager — EC2 Instances & Elastic IPs'
   );
 });
 

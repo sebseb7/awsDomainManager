@@ -3,6 +3,7 @@ import { Box, Text, useInput } from 'ink';
 
 const RESOURCE_TYPES = [
   { id: 'route53', label: 'Route53 Hosted Zones (DNS Records)' },
+  { id: 'ec2-instances', label: 'EC2 Instances & Elastic IPs (State, IPs, Reboot, Lock)' },
   { id: 'ec2', label: 'EC2 Security Groups (Inbound Rules)' },
   { id: 's3', label: 'S3 Buckets (Buckets & Objects)' },
   { id: 'ses', label: 'Amazon SES (Domain & Email Identities)' },

@@ -12,9 +12,11 @@ import BucketObjectsScreen from './screens/BucketObjectsScreen.jsx';
 import BucketKeysScreen from './screens/BucketKeysScreen.jsx';
 import SesScreen from './screens/SesScreen.jsx';
 import SesSenderKeysScreen from './screens/SesSenderKeysScreen.jsx';
+import Ec2InstancesScreen from './screens/Ec2InstancesScreen.jsx';
 
 const getTitle = (selectedResource) => {
   if (!selectedResource) return 'AWS Domain Manager';
+  if (selectedResource.id === 'ec2-instances') return 'EC2 Instances & Elastic IPs Manager';
   if (selectedResource.id === 'ec2') return 'EC2 Security Group Inbound Rules Manager';
   if (selectedResource.id === 's3') return 'S3 Bucket Manager';
   if (selectedResource.id === 'ses') return 'Amazon SES Identity Manager (Domains & Email Addresses)';
@@ -120,6 +122,22 @@ const App = (props) => {
     setSmtpTestFormData,
     submitSmtpTest,
     cancelSmtpTest,
+    ec2Instances,
+    elasticIps,
+    selectedEc2Index,
+    showEc2DetailsModal,
+    setShowEc2DetailsModal,
+    showAllocateEipModal,
+    setShowAllocateEipModal,
+    newEipName,
+    setNewEipName,
+    submitAllocateEip,
+    showAssociateEipModal,
+    setShowAssociateEipModal,
+    associateInstanceIdx,
+    setAssociateInstanceIdx,
+    submitAssociateEip,
+    ec2ConfirmAction,
   } = props;
 
   const renderScreen = () => {
@@ -324,6 +342,31 @@ const App = (props) => {
             setSmtpTestFormData={setSmtpTestFormData}
             submitSmtpTest={submitSmtpTest}
             cancelSmtpTest={cancelSmtpTest}
+            statusMessage={statusMessage}
+          />
+        );
+
+      case 'ec2-instances':
+        return (
+          <Ec2InstancesScreen
+            selectedAccount={selectedAccount}
+            ec2Instances={ec2Instances}
+            elasticIps={elasticIps}
+            loading={loading}
+            selectedEc2Index={selectedEc2Index}
+            showEc2DetailsModal={showEc2DetailsModal}
+            setShowEc2DetailsModal={setShowEc2DetailsModal}
+            showAllocateEipModal={showAllocateEipModal}
+            setShowAllocateEipModal={setShowAllocateEipModal}
+            newEipName={newEipName}
+            setNewEipName={setNewEipName}
+            submitAllocateEip={submitAllocateEip}
+            showAssociateEipModal={showAssociateEipModal}
+            setShowAssociateEipModal={setShowAssociateEipModal}
+            associateInstanceIdx={associateInstanceIdx}
+            setAssociateInstanceIdx={setAssociateInstanceIdx}
+            submitAssociateEip={submitAssociateEip}
+            ec2ConfirmAction={ec2ConfirmAction}
             statusMessage={statusMessage}
           />
         );

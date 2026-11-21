@@ -8,7 +8,22 @@ import {
   removeAwsProfile,
 } from './utils/profiles.js';
 import { loadHostedZones, loadRecords, createRecord, deleteRecord as deleteRecordService } from './services/route53Service.js';
-import { loadSecurityGroups, loadInboundRules, addInboundRule, deleteInboundRule as deleteRuleService } from './services/ec2Service.js';
+import {
+  loadSecurityGroups,
+  loadInboundRules,
+  addInboundRule,
+  deleteInboundRule as deleteRuleService,
+  loadEc2Instances,
+  loadElasticIps,
+  rebootEc2Instance,
+  startEc2Instance,
+  stopEc2Instance,
+  setEc2RebootLock,
+  allocateElasticIp,
+  associateElasticIp,
+  disassociateElasticIp,
+  releaseElasticIp,
+} from './services/ec2Service.js';
 import {
   loadBuckets,
   createBucket,
@@ -94,6 +109,17 @@ const CLI = () => {
     description: '',
   });
 
+  // EC2 Instances & Elastic IPs state
+  const [ec2Instances, setEc2Instances] = useState([]);
+  const [elasticIps, setElasticIps] = useState([]);
+  const [selectedEc2Index, setSelectedEc2Index] = useState(0);
+  const [showEc2DetailsModal, setShowEc2DetailsModal] = useState(false);
+  const [showAllocateEipModal, setShowAllocateEipModal] = useState(false);
+  const [newEipName, setNewEipName] = useState('');
+  const [showAssociateEipModal, setShowAssociateEipModal] = useState(false);
+  const [associateInstanceIdx, setAssociateInstanceIdx] = useState(0);
+  const [ec2ConfirmAction, setEc2ConfirmAction] = useState(null);
+
   // S3 state
   const [buckets, setBuckets] = useState([]);
   const [selectedBucket, setSelectedBucket] = useState(null);
@@ -172,6 +198,13 @@ const CLI = () => {
     }
   }, [selectedAccount, screen, selectedResource]);
 
+  // Load EC2 instances and Elastic IPs when account is selected (EC2 Instances flow)
+  useEffect(() => {
+    if (selectedAccount && screen === 'ec2-instances' && selectedResource?.id === 'ec2-instances') {
+      loadEc2InstancesAndEipsAndHandleError(selectedAccount);
+    }
+  }, [selectedAccount, screen, selectedResource]);
+
   // Load S3 buckets when account is selected (S3 flow)
   useEffect(() => {
     if (selectedAccount && screen === 's3-buckets' && selectedResource?.id === 's3') {
@@ -232,6 +265,15 @@ const CLI = () => {
       setSelectedGroup(null);
       setSecurityGroups([]);
       setRules([]);
+      setEc2Instances([]);
+      setElasticIps([]);
+      setSelectedEc2Index(0);
+      setShowEc2DetailsModal(false);
+      setShowAllocateEipModal(false);
+      setNewEipName('');
+      setShowAssociateEipModal(false);
+      setAssociateInstanceIdx(0);
+      setEc2ConfirmAction(null);
       setBuckets([]);
       setSelectedBucket(null);
       setSelectedBucketIndex(0);
@@ -311,6 +353,233 @@ const CLI = () => {
       setSecurityGroups(groups);
     } catch (err) {
       setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const loadEc2InstancesAndEipsAndHandleError = async (account) => {
+    setLoading(true);
+    setError(null);
+    try {
+      const [loadedInstances, loadedEips] = await Promise.all([
+        loadEc2Instances(account),
+        loadElasticIps(account),
+      ]);
+      setEc2Instances(loadedInstances);
+      setElasticIps(loadedEips);
+      const total = loadedInstances.length + loadedEips.length;
+      setSelectedEc2Index((prev) => (total === 0 ? 0 : Math.min(prev, total - 1)));
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const toggleEc2Lock = async () => {
+    if (!selectedAccount || selectedEc2Index >= ec2Instances.length) {
+      setError('Select an EC2 instance row to toggle Reboot Lock.');
+      return;
+    }
+    const inst = ec2Instances[selectedEc2Index];
+    if (!inst) return;
+    setLoading(true);
+    setError(null);
+    try {
+      const msg = await setEc2RebootLock(selectedAccount, inst.instanceId, !inst.rebootLock);
+      setStatusMessage(msg);
+      await loadEc2InstancesAndEipsAndHandleError(selectedAccount);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const promptRebootEc2 = () => {
+    if (selectedEc2Index >= ec2Instances.length) {
+      setError('Select an EC2 instance row to reboot.');
+      return;
+    }
+    const inst = ec2Instances[selectedEc2Index];
+    if (!inst) return;
+    if (inst.rebootLock) {
+      setError(
+        `Instance "${inst.name !== '-' ? inst.name : inst.instanceId}" has Reboot Lock enabled. Press 'l' to unlock before rebooting.`
+      );
+      return;
+    }
+    if (inst.state !== 'running') {
+      setError(`Instance "${inst.instanceId}" is ${inst.state}. Only running instances can be rebooted.`);
+      return;
+    }
+    setError(null);
+    setStatusMessage(null);
+    setEc2ConfirmAction({
+      type: 'reboot',
+      instanceId: inst.instanceId,
+      label: 'EC2 Instance Reboot',
+      message: `Reboot instance "${inst.name !== '-' ? inst.name : inst.instanceId}" (${inst.instanceId} · ${inst.publicIp})?`,
+    });
+  };
+
+  const promptStartStopEc2 = async () => {
+    if (!selectedAccount || selectedEc2Index >= ec2Instances.length) {
+      setError('Select an EC2 instance row to start or stop.');
+      return;
+    }
+    const inst = ec2Instances[selectedEc2Index];
+    if (!inst) return;
+    if (inst.state === 'stopped') {
+      setLoading(true);
+      setError(null);
+      try {
+        const msg = await startEc2Instance(selectedAccount, inst.instanceId);
+        setStatusMessage(msg);
+        await loadEc2InstancesAndEipsAndHandleError(selectedAccount);
+      } catch (err) {
+        setError(err.message);
+      } finally {
+        setLoading(false);
+      }
+      return;
+    }
+    if (inst.rebootLock) {
+      setError(
+        `Instance "${inst.name !== '-' ? inst.name : inst.instanceId}" has Reboot Lock enabled. Press 'l' to unlock before stopping.`
+      );
+      return;
+    }
+    if (inst.state !== 'running') {
+      setError(`Instance "${inst.instanceId}" is currently ${inst.state}.`);
+      return;
+    }
+    setError(null);
+    setStatusMessage(null);
+    setEc2ConfirmAction({
+      type: 'stop',
+      instanceId: inst.instanceId,
+      label: 'Stop EC2 Instance',
+      message: `Stop running instance "${inst.name !== '-' ? inst.name : inst.instanceId}" (${inst.instanceId})?`,
+    });
+  };
+
+  const submitAllocateEip = async () => {
+    if (!selectedAccount) return;
+    setLoading(true);
+    setError(null);
+    try {
+      const created = await allocateElasticIp(selectedAccount, newEipName);
+      setShowAllocateEipModal(false);
+      setNewEipName('');
+      setStatusMessage(
+        `Allocated Elastic IP ${created.publicIp} (${created.allocationId}).`
+      );
+      await loadEc2InstancesAndEipsAndHandleError(selectedAccount);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const openAssociateEip = () => {
+    if (selectedEc2Index < ec2Instances.length) {
+      setError('Select an Elastic IP row in the bottom table to associate it with an instance.');
+      return;
+    }
+    if (ec2Instances.length === 0) {
+      setError('No EC2 instances available in this region to associate.');
+      return;
+    }
+    setError(null);
+    setStatusMessage(null);
+    setAssociateInstanceIdx(0);
+    setShowAssociateEipModal(true);
+  };
+
+  const submitAssociateEip = async (instanceId) => {
+    const eip = elasticIps[selectedEc2Index - ec2Instances.length];
+    if (!selectedAccount || !eip || !instanceId) return;
+    setLoading(true);
+    setError(null);
+    try {
+      const msg = await associateElasticIp(selectedAccount, eip.allocationId, instanceId);
+      setShowAssociateEipModal(false);
+      setStatusMessage(msg);
+      await loadEc2InstancesAndEipsAndHandleError(selectedAccount);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const promptDisassociateEip = () => {
+    if (selectedEc2Index < ec2Instances.length) {
+      setError('Select an Elastic IP row to disassociate.');
+      return;
+    }
+    const eip = elasticIps[selectedEc2Index - ec2Instances.length];
+    if (!eip) return;
+    if (!eip.associationId) {
+      setError(`Elastic IP ${eip.publicIp} is already unassociated.`);
+      return;
+    }
+    setError(null);
+    setStatusMessage(null);
+    setEc2ConfirmAction({
+      type: 'disassociate-eip',
+      associationId: eip.associationId,
+      label: 'Disassociate Elastic IP',
+      message: `Disassociate Elastic IP ${eip.publicIp} from ${eip.instanceName || eip.instanceId || eip.networkInterfaceId}?`,
+    });
+  };
+
+  const promptReleaseEip = () => {
+    if (selectedEc2Index < ec2Instances.length) {
+      setError('Select an unassociated Elastic IP row to release.');
+      return;
+    }
+    const eip = elasticIps[selectedEc2Index - ec2Instances.length];
+    if (!eip) return;
+    if (eip.associationId) {
+      setError(`Disassociate Elastic IP ${eip.publicIp} (press 'u') before releasing it.`);
+      return;
+    }
+    setError(null);
+    setStatusMessage(null);
+    setEc2ConfirmAction({
+      type: 'release-eip',
+      allocationId: eip.allocationId,
+      label: 'Release Elastic IP',
+      message: `Release Elastic IP ${eip.publicIp} (${eip.allocationId}) back to Amazon's pool?`,
+    });
+  };
+
+  const confirmEc2Action = async () => {
+    if (!selectedAccount || !ec2ConfirmAction) return;
+    const action = ec2ConfirmAction;
+    setLoading(true);
+    setError(null);
+    try {
+      let msg = '';
+      if (action.type === 'reboot') {
+        msg = await rebootEc2Instance(selectedAccount, action.instanceId);
+      } else if (action.type === 'stop') {
+        msg = await stopEc2Instance(selectedAccount, action.instanceId);
+      } else if (action.type === 'disassociate-eip') {
+        msg = await disassociateElasticIp(selectedAccount, action.associationId);
+      } else if (action.type === 'release-eip') {
+        msg = await releaseElasticIp(selectedAccount, action.allocationId);
+      }
+      setEc2ConfirmAction(null);
+      setStatusMessage(msg);
+      await loadEc2InstancesAndEipsAndHandleError(selectedAccount);
+    } catch (err) {
+      setError(err.message);
+      setEc2ConfirmAction(null);
     } finally {
       setLoading(false);
     }
@@ -1066,6 +1335,7 @@ const CLI = () => {
     if (screen === 's3-keys') return bucketKeys;
     if (screen === 'ses-identities') return sesIdentities;
     if (screen === 'ses-keys') return sesSenderKeys;
+    if (screen === 'ec2-instances') return [...ec2Instances, ...elasticIps];
     if (screen === 'rules') return rules;
     return records;
   };
@@ -1077,6 +1347,7 @@ const CLI = () => {
     if (screen === 's3-keys') return selectedKeyIndex;
     if (screen === 'ses-identities') return selectedSesIndex;
     if (screen === 'ses-keys') return selectedSesKeyIndex;
+    if (screen === 'ec2-instances') return selectedEc2Index;
     if (screen === 'rules') return selectedRuleIndex;
     return selectedRecordIndex;
   };
@@ -1087,25 +1358,28 @@ const CLI = () => {
   // Keyboard navigation handlers
   const navigationActions = {
     handleDeleteConfirm:
-      screen === 's3-keys'
-        ? confirmBucketKeyAction
-        : screen === 'ses-keys'
-          ? confirmSesKeyAction
-          : screen === 'ses-identities'
-            ? deleteSesIdentity
-            : screen === 'manage-accounts'
-              ? deleteAccount
-              : screen === 's3-buckets'
-                ? deleteBucket
-                : screen === 's3-objects'
-                  ? deleteObject
-                  : screen === 'rules'
-                    ? deleteRule
-                    : deleteRecord,
+      screen === 'ec2-instances'
+        ? confirmEc2Action
+        : screen === 's3-keys'
+          ? confirmBucketKeyAction
+          : screen === 'ses-keys'
+            ? confirmSesKeyAction
+            : screen === 'ses-identities'
+              ? deleteSesIdentity
+              : screen === 'manage-accounts'
+                ? deleteAccount
+                : screen === 's3-buckets'
+                  ? deleteBucket
+                  : screen === 's3-objects'
+                    ? deleteObject
+                    : screen === 'rules'
+                      ? deleteRule
+                      : deleteRecord,
     handleDeleteCancel: () => {
       setShowDeleteConfirm(false);
       setKeyConfirmAction(null);
       setSesKeyConfirmAction(null);
+      setEc2ConfirmAction(null);
     },
     handleAddRecord: (recordType) => {
       if (screen === 'manage-accounts') {
@@ -1256,6 +1530,64 @@ const CLI = () => {
         setShowSesDkimModal(true);
       }
     },
+    handleToggleEc2Lock: () => {
+      if (screen === 'ec2-instances') {
+        toggleEc2Lock();
+      }
+    },
+    handleRebootEc2Instance: () => {
+      if (screen === 'ec2-instances') {
+        promptRebootEc2();
+      }
+    },
+    handleStartStopEc2Instance: () => {
+      if (screen === 'ec2-instances') {
+        promptStartStopEc2();
+      }
+    },
+    handleViewEc2Details: () => {
+      if (screen === 'ec2-instances') {
+        if (selectedEc2Index < ec2Instances.length) {
+          setError(null);
+          setStatusMessage(null);
+          setShowEc2DetailsModal(true);
+        } else {
+          openAssociateEip();
+        }
+      }
+    },
+    handleAllocateEip: () => {
+      if (screen === 'ec2-instances') {
+        setError(null);
+        setStatusMessage(null);
+        setNewEipName('');
+        setShowAllocateEipModal(true);
+      }
+    },
+    handleAssociateEip: () => {
+      if (screen === 'ec2-instances') {
+        openAssociateEip();
+      }
+    },
+    handleDisassociateEip: () => {
+      if (screen === 'ec2-instances') {
+        promptDisassociateEip();
+      }
+    },
+    handleReleaseEip: () => {
+      if (screen === 'ec2-instances') {
+        promptReleaseEip();
+      }
+    },
+    handleTabEc2Section: () => {
+      if (screen === 'ec2-instances') {
+        if (selectedEc2Index < ec2Instances.length && elasticIps.length > 0) {
+          setSelectedEc2Index(ec2Instances.length);
+        } else if (ec2Instances.length > 0) {
+          setSelectedEc2Index(0);
+        }
+      }
+    },
     handleDeleteRecord: () => {
       if (screen === 's3-objects' && objects[selectedObjectIndex]?.isFolder) {
         setError('Folders cannot be deleted directly. Open the folder and delete objects inside.');
@@ -1292,6 +1624,8 @@ const CLI = () => {
         setSelectedSesIndex((prev) => Math.max(0, prev - 1));
       } else if (screen === 'ses-keys') {
         setSelectedSesKeyIndex((prev) => Math.max(0, prev - 1));
+      } else if (screen === 'ec2-instances') {
+        setSelectedEc2Index((prev) => Math.max(0, prev - 1));
       } else if (screen === 'rules') {
         setSelectedRuleIndex(prev => Math.max(0, prev - 1));
       } else {
@@ -1311,6 +1645,9 @@ const CLI = () => {
         setSelectedSesIndex((prev) => Math.min(sesIdentities.length - 1, prev + 1));
       } else if (screen === 'ses-keys') {
         setSelectedSesKeyIndex((prev) => Math.min(sesSenderKeys.length - 1, prev + 1));
+      } else if (screen === 'ec2-instances') {
+        const total = ec2Instances.length + elasticIps.length;
+        setSelectedEc2Index((prev) => Math.min(Math.max(0, total - 1), prev + 1));
       } else if (screen === 'rules') {
         setSelectedRuleIndex(prev => Math.min(rules.length - 1, prev + 1));
       } else {
@@ -1328,6 +1665,14 @@ const CLI = () => {
         cancelAddSesKey();
       } else if (showSesDkimModal) {
         setShowSesDkimModal(false);
+      } else if (showEc2DetailsModal) {
+        setShowEc2DetailsModal(false);
+      } else if (showAllocateEipModal) {
+        setShowAllocateEipModal(false);
+        setError(null);
+      } else if (showAssociateEipModal) {
+        setShowAssociateEipModal(false);
+        setError(null);
       } else if (addKeyRole) {
         cancelAddBucketKey();
       } else if (showAddSesIdentity) {
@@ -1393,6 +1738,18 @@ const CLI = () => {
         setShowAddSesIdentity(false);
         setStatusMessage(null);
         setError(null);
+      } else if (screen === 'ec2-instances') {
+        setScreen('account');
+        setSelectedAccount(null);
+        setEc2Instances([]);
+        setElasticIps([]);
+        setSelectedEc2Index(0);
+        setShowEc2DetailsModal(false);
+        setShowAllocateEipModal(false);
+        setShowAssociateEipModal(false);
+        setEc2ConfirmAction(null);
+        setStatusMessage(null);
+        setError(null);
       } else if (screen === 'records' || screen === 'rules') {
         if (screen === 'records') {
           setScreen('zone');
@@ -1430,13 +1787,19 @@ const CLI = () => {
       showSesDkimModal ||
       showAddSesKey ||
       showSmtpTestForm ||
+      showEc2DetailsModal ||
+      showAllocateEipModal ||
+      showAssociateEipModal ||
       Boolean(accountFormMode) ||
       Boolean(objectFormMode) ||
       Boolean(addKeyRole) ||
       Boolean(createdIamResult) ||
       Boolean(createdSesKeyResult),
     showDeleteConfirm:
-      showDeleteConfirm || Boolean(keyConfirmAction) || Boolean(sesKeyConfirmAction),
+      showDeleteConfirm ||
+      Boolean(keyConfirmAction) ||
+      Boolean(sesKeyConfirmAction) ||
+      Boolean(ec2ConfirmAction),
     records: currentRecords,
     selectedRecordIndex: currentIndex,
   };
@@ -1542,6 +1905,22 @@ const CLI = () => {
       setSmtpTestFormData={setSmtpTestFormData}
       submitSmtpTest={submitSmtpTest}
       cancelSmtpTest={cancelSmtpTest}
+      ec2Instances={ec2Instances}
+      elasticIps={elasticIps}
+      selectedEc2Index={selectedEc2Index}
+      showEc2DetailsModal={showEc2DetailsModal}
+      setShowEc2DetailsModal={setShowEc2DetailsModal}
+      showAllocateEipModal={showAllocateEipModal}
+      setShowAllocateEipModal={setShowAllocateEipModal}
+      newEipName={newEipName}
+      setNewEipName={setNewEipName}
+      submitAllocateEip={submitAllocateEip}
+      showAssociateEipModal={showAssociateEipModal}
+      setShowAssociateEipModal={setShowAssociateEipModal}
+      associateInstanceIdx={associateInstanceIdx}
+      setAssociateInstanceIdx={setAssociateInstanceIdx}
+      submitAssociateEip={submitAssociateEip}
+      ec2ConfirmAction={ec2ConfirmAction}
     />
   );
 };

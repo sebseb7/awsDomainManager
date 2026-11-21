@@ -56,6 +56,41 @@ export interface AddRuleInput {
   description: string;
 }
 
+export interface Ec2Instance {
+  instanceId: string;
+  name: string;
+  state: 'running' | 'stopped' | 'pending' | 'stopping' | 'shutting-down' | 'terminated' | 'rebooting' | string;
+  instanceType: string;
+  availabilityZone: string;
+  publicIp: string;
+  privateIp: string;
+  ipv6Address: string;
+  elasticIp?: string | null;
+  elasticIpAllocationId?: string | null;
+  vpcId: string;
+  subnetId: string;
+  keyName: string;
+  architecture: string;
+  platform: string;
+  launchTime: string;
+  securityGroups: string[];
+  rebootLock: boolean;
+}
+
+export interface ElasticIp {
+  allocationId: string;
+  publicIp: string;
+  name: string;
+  associationId?: string | null;
+  instanceId?: string | null;
+  instanceName?: string | null;
+  privateIp: string;
+  networkInterfaceId: string;
+  domain: string;
+  publicIpv4Pool: string;
+  networkBorderGroup: string;
+}
+
 export interface S3Bucket {
   name: string;
   creationDate: string;
@@ -150,4 +185,4 @@ export interface SmtpTestSendInput {
   body: string;
 }
 
-export type NavSection = 'route53' | 'ec2' | 's3' | 'ses' | 'accounts';
+export type NavSection = 'route53' | 'ec2-instances' | 'ec2' | 's3' | 'ses' | 'accounts';

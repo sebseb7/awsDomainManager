@@ -7,7 +7,7 @@ mod s3;
 mod ses;
 mod ses_smtp;
 
-use ec2::{AddRuleInput, InboundRuleDto, SecurityGroupDto};
+use ec2::{AddRuleInput, Ec2InstanceDto, ElasticIpDto, InboundRuleDto, SecurityGroupDto};
 use iam::{BucketIamUserDto, CreatedIamUserDto};
 use profiles::{AccountInput, AwsProfile};
 use route53::{DnsRecordDto, HostedZoneDto, RecordInput};
@@ -98,6 +98,70 @@ async fn delete_inbound_rule(
     rule_id: String,
 ) -> Result<(), String> {
     ec2::delete_inbound_rule(&profile, &group_id, &rule_id).await
+}
+
+#[tauri::command]
+async fn list_ec2_instances(profile: String) -> Result<Vec<Ec2InstanceDto>, String> {
+    ec2::list_ec2_instances(&profile).await
+}
+
+#[tauri::command]
+async fn reboot_ec2_instance(profile: String, instance_id: String) -> Result<String, String> {
+    ec2::reboot_ec2_instance(&profile, &instance_id).await
+}
+
+#[tauri::command]
+async fn start_ec2_instance(profile: String, instance_id: String) -> Result<String, String> {
+    ec2::start_ec2_instance(&profile, &instance_id).await
+}
+
+#[tauri::command]
+async fn stop_ec2_instance(profile: String, instance_id: String) -> Result<String, String> {
+    ec2::stop_ec2_instance(&profile, &instance_id).await
+}
+
+#[tauri::command]
+async fn set_ec2_reboot_lock(
+    profile: String,
+    instance_id: String,
+    locked: bool,
+) -> Result<String, String> {
+    ec2::set_ec2_reboot_lock(&profile, &instance_id, locked).await
+}
+
+#[tauri::command]
+async fn list_elastic_ips(profile: String) -> Result<Vec<ElasticIpDto>, String> {
+    ec2::list_elastic_ips(&profile).await
+}
+
+#[tauri::command]
+async fn allocate_elastic_ip(
+    profile: String,
+    name: Option<String>,
+) -> Result<ElasticIpDto, String> {
+    ec2::allocate_elastic_ip(&profile, name).await
+}
+
+#[tauri::command]
+async fn associate_elastic_ip(
+    profile: String,
+    allocation_id: String,
+    instance_id: String,
+) -> Result<String, String> {
+    ec2::associate_elastic_ip(&profile, &allocation_id, &instance_id).await
+}
+
+#[tauri::command]
+async fn disassociate_elastic_ip(
+    profile: String,
+    association_id: String,
+) -> Result<String, String> {
+    ec2::disassociate_elastic_ip(&profile, &association_id).await
+}
+
+#[tauri::command]
+async fn release_elastic_ip(profile: String, allocation_id: String) -> Result<String, String> {
+    ec2::release_elastic_ip(&profile, &allocation_id).await
 }
 
 #[tauri::command]
@@ -295,6 +359,16 @@ pub fn run() {
             list_inbound_rules,
             add_inbound_rule,
             delete_inbound_rule,
+            list_ec2_instances,
+            reboot_ec2_instance,
+            start_ec2_instance,
+            stop_ec2_instance,
+            set_ec2_reboot_lock,
+            list_elastic_ips,
+            allocate_elastic_ip,
+            associate_elastic_ip,
+            disassociate_elastic_ip,
+            release_elastic_ip,
             list_buckets,
             create_bucket,
             delete_bucket,

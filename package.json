@@ -1,6 +1,6 @@
 {
   "name": "awsdomainmanager",
-  "version": "2.3.0",
+  "version": "2.4.0",
   "description": "CLI tool for managing AWS Route 53 records across multiple accounts",
   "main": "dist/cli.cjs",
   "type": "module",

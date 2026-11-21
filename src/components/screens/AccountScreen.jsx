@@ -21,7 +21,9 @@ const AccountScreen = ({
         onSelect={(account) => {
           setSelectedAccount(account);
           // Navigate to the correct screen based on selected resource
-          if (selectedResource?.id === 'ec2') {
+          if (selectedResource?.id === 'ec2-instances') {
+            setScreen('ec2-instances');
+          } else if (selectedResource?.id === 'ec2') {
             setScreen('sg');
           } else if (selectedResource?.id === 's3') {
             setScreen('s3-buckets');

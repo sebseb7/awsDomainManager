@@ -8,6 +8,8 @@ import type {
   CreatedIamUser,
   CreatedSesSenderKey,
   DnsRecord,
+  Ec2Instance,
+  ElasticIp,
   HostedZone,
   InboundRule,
   S3Bucket,
@@ -46,6 +48,31 @@ export const api = {
     invoke<void>('add_inbound_rule', { profile, groupId, rule }),
   deleteInboundRule: (profile: string, groupId: string, ruleId: string) =>
     invoke<void>('delete_inbound_rule', { profile, groupId, ruleId }),
+
+  // EC2 Instances & Elastic IPs
+  listEc2Instances: (profile: string) =>
+    invoke<Ec2Instance[]>('list_ec2_instances', { profile }),
+  rebootEc2Instance: (profile: string, instanceId: string) =>
+    invoke<string>('reboot_ec2_instance', { profile, instanceId }),
+  startEc2Instance: (profile: string, instanceId: string) =>
+    invoke<string>('start_ec2_instance', { profile, instanceId }),
+  stopEc2Instance: (profile: string, instanceId: string) =>
+    invoke<string>('stop_ec2_instance', { profile, instanceId }),
+  setEc2RebootLock: (profile: string, instanceId: string, locked: boolean) =>
+    invoke<string>('set_ec2_reboot_lock', { profile, instanceId, locked }),
+  listElasticIps: (profile: string) =>
+    invoke<ElasticIp[]>('list_elastic_ips', { profile }),
+  allocateElasticIp: (profile: string, name?: string) =>
+    invoke<ElasticIp>('allocate_elastic_ip', {
+      profile,
+      name: name?.trim() ? name.trim() : null,
+    }),
+  associateElasticIp: (profile: string, allocationId: string, instanceId: string) =>
+    invoke<string>('associate_elastic_ip', { profile, allocationId, instanceId }),
+  disassociateElasticIp: (profile: string, associationId: string) =>
+    invoke<string>('disassociate_elastic_ip', { profile, associationId }),
+  releaseElasticIp: (profile: string, allocationId: string) =>
+    invoke<string>('release_elastic_ip', { profile, allocationId }),
 
   // S3 & IAM
   listBuckets: (profile: string) => invoke<S3Bucket[]>('list_buckets', { profile }),

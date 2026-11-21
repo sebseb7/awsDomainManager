@@ -5,6 +5,8 @@ import {
   DUMMY_HOSTED_ZONES,
   DUMMY_DNS_RECORDS,
   DUMMY_SECURITY_GROUPS,
+  DUMMY_EC2_INSTANCES,
+  DUMMY_ELASTIC_IPS,
   DUMMY_INBOUND_RULES,
   DUMMY_BUCKETS,
   DUMMY_S3_OBJECTS,
@@ -23,6 +25,8 @@ test.beforeEach(async ({ page }) => {
       zones,
       records,
       groups,
+      ec2Instances,
+      elasticIps,
       rules,
       buckets,
       objects,
@@ -34,6 +38,8 @@ test.beforeEach(async ({ page }) => {
       let currentUsers = structuredClone(iamUsers);
       let currentSes = structuredClone(sesIdentities);
       let currentSesKeys = structuredClone(sesSenderKeys);
+      let currentInstances = structuredClone(ec2Instances);
+      let currentEips = structuredClone(elasticIps);
 
       window.__TAURI_INTERNALS__ = {
         transformCallback: () => 0,
@@ -49,6 +55,93 @@ test.beforeEach(async ({ page }) => {
               return groups;
             case 'list_inbound_rules':
               return rules;
+            case 'list_ec2_instances':
+              return currentInstances;
+            case 'list_elastic_ips':
+              return currentEips;
+            case 'set_ec2_reboot_lock': {
+              currentInstances = currentInstances.map((inst) =>
+                inst.instanceId === args.instanceId
+                  ? { ...inst, rebootLock: Boolean(args.locked) }
+                  : inst
+              );
+              return args.locked
+                ? `Reboot Lock enabled for instance ${args.instanceId} (Tag RebootLock=true).`
+                : `Reboot Lock disabled for instance ${args.instanceId}.`;
+            }
+            case 'reboot_ec2_instance': {
+              const target = currentInstances.find((i) => i.instanceId === args.instanceId);
+              if (target?.rebootLock) {
+                throw `Instance ${args.instanceId} has Reboot Lock enabled. Unlock it before attempting to reboot.`;
+              }
+              return `Reboot initiated for EC2 instance ${args.instanceId}.`;
+            }
+            case 'start_ec2_instance': {
+              currentInstances = currentInstances.map((inst) =>
+                inst.instanceId === args.instanceId ? { ...inst, state: 'running' } : inst
+              );
+              return `Start initiated for EC2 instance ${args.instanceId}.`;
+            }
+            case 'stop_ec2_instance': {
+              const target = currentInstances.find((i) => i.instanceId === args.instanceId);
+              if (target?.rebootLock) {
+                throw `Instance ${args.instanceId} has Reboot Lock enabled. Unlock it before attempting to stop.`;
+              }
+              currentInstances = currentInstances.map((inst) =>
+                inst.instanceId === args.instanceId ? { ...inst, state: 'stopped' } : inst
+              );
+              return `Stop initiated for EC2 instance ${args.instanceId}.`;
+            }
+            case 'allocate_elastic_ip': {
+              const created = {
+                allocationId: `eipalloc-0a1b2c3d4e5f6000${currentEips.length + 1}`,
+                publicIp: '35.158.112.90',
+                name: args.name || '-',
+                associationId: null,
+                instanceId: null,
+                instanceName: null,
+                privateIp: '-',
+                networkInterfaceId: '-',
+                domain: 'vpc',
+                publicIpv4Pool: 'amazon',
+                networkBorderGroup: 'eu-central-1',
+              };
+              currentEips.push(created);
+              return created;
+            }
+            case 'associate_elastic_ip': {
+              const inst = currentInstances.find((i) => i.instanceId === args.instanceId);
+              currentEips = currentEips.map((e) =>
+                e.allocationId === args.allocationId
+                  ? {
+                      ...e,
+                      associationId: 'eipassoc-0987654321fed9999',
+                      instanceId: args.instanceId,
+                      instanceName: inst?.name || null,
+                      privateIp: inst?.privateIp || '-',
+                    }
+                  : e
+              );
+              return `Associated Elastic IP (${args.allocationId}) with instance ${args.instanceId}.`;
+            }
+            case 'disassociate_elastic_ip': {
+              currentEips = currentEips.map((e) =>
+                e.associationId === args.associationId
+                  ? {
+                      ...e,
+                      associationId: null,
+                      instanceId: null,
+                      instanceName: null,
+                      privateIp: '-',
+                    }
+                  : e
+              );
+              return `Disassociated Elastic IP (association ${args.associationId}).`;
+            }
+            case 'release_elastic_ip': {
+              currentEips = currentEips.filter((e) => e.allocationId !== args.allocationId);
+              return `Released Elastic IP ${args.allocationId}.`;
+            }
             case 'list_buckets':
               return buckets;
             case 'list_bucket_objects':
@@ -229,6 +322,8 @@ test.beforeEach(async ({ page }) => {
       zones: DUMMY_HOSTED_ZONES,
       records: DUMMY_DNS_RECORDS,
       groups: DUMMY_SECURITY_GROUPS,
+      ec2Instances: DUMMY_EC2_INSTANCES,
+      elasticIps: DUMMY_ELASTIC_IPS,
       rules: DUMMY_INBOUND_RULES,
       buckets: DUMMY_BUCKETS,
       objects: DUMMY_S3_OBJECTS,
@@ -251,7 +346,34 @@ test('Desktop App: Route53, EC2, S3 IAM Keys (multiple read / single write), QR 
   await expect(page.getByText('203.0.113.10')).toBeVisible();
   await page.screenshot({ path: 'docs/desktop-route53.png' });
 
-  // 2. EC2 Security Groups -> click into prod-web-sg
+  // 2. EC2 Instances & Elastic IPs -> state, IP, reboot, reboot lock & Elastic IP list
+  await page.getByRole('button', { name: /EC2 Instances & EIPs/i }).click();
+  await expect(page.getByText('EC2 Instances (4)')).toBeVisible();
+  await expect(page.getByText('Elastic IPs (3)')).toBeVisible();
+  await expect(page.getByText('spare-failover-eip')).toBeVisible();
+  await expect(page.getByText('52.59.210.77')).toBeVisible();
+  const webInstRow = page.locator('tr', { hasText: 'i-0a1b2c3d4e5f60101' });
+  await expect(webInstRow.getByText('Locked', { exact: true })).toBeVisible();
+  await expect(webInstRow.getByRole('button', { name: /Reboot/i })).toBeDisabled();
+  const apiInstRow = page.locator('tr', { hasText: 'i-0a1b2c3d4e5f60102' });
+  await expect(apiInstRow.getByText('Unlocked', { exact: true })).toBeVisible();
+  await expect(apiInstRow.getByRole('button', { name: /Reboot/i })).toBeEnabled();
+  await page.screenshot({ path: 'docs/desktop-ec2-instances.png' });
+
+  // Test toggling Reboot Lock and rebooting an unlocked instance
+  await apiInstRow.getByRole('button', { name: /Reboot/i }).click();
+  await expect(page.getByText('Reboot EC2 Instance')).toBeVisible();
+  await page.getByRole('button', { name: /Reboot Instance/i }).click();
+  await expect(
+    page.getByText('Reboot initiated for EC2 instance i-0a1b2c3d4e5f60102.')
+  ).toBeVisible();
+  await apiInstRow.getByRole('button', { name: 'Lock', exact: true }).click();
+  await expect(
+    page.getByText('Reboot Lock enabled for instance i-0a1b2c3d4e5f60102')
+  ).toBeVisible();
+  await expect(apiInstRow.getByRole('button', { name: /Reboot/i })).toBeDisabled();
+
+  // 2b. EC2 Security Groups -> click into prod-web-sg
   await page.getByRole('button', { name: /EC2 Security Groups/i }).click();
   await expect(page.getByText('prod-web-sg')).toBeVisible();
   await page.getByText('prod-web-sg').click();
@@ -351,6 +473,9 @@ test('Desktop App: Route53, EC2, S3 IAM Keys (multiple read / single write), QR 
   await expect(page.getByText('IAMScopedUsersOnly')).toBeVisible();
   await expect(page.getByText('arn:aws:iam::*:user/s3-bucket-users/*')).toBeVisible();
   await expect(page.getByText('arn:aws:iam::*:user/ses-smtp-users/*')).toBeVisible();
+  await expect(page.getByText('ec2:DescribeInstances')).toBeVisible();
+  await expect(page.getByText('ec2:RebootInstances')).toBeVisible();
+  await expect(page.getByText('ec2:DescribeAddresses')).toBeVisible();
   await expect(page.getByText('ses:CreateEmailIdentity')).toBeVisible();
   const policyText = await page.locator('pre.code-block').innerText();
   expect(policyText.length).toBeLessThanOrEqual(2048);

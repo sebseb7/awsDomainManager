@@ -181,9 +181,9 @@ jobs:
           tagName: ${{ github.ref_name }}
           releaseName: 'AWS Domain Manager ${{ github.ref_name }}'
           releaseBody: |
-            ## AWS Domain Manager Desktop (Tauri v2)
+            ## AWS Domain Manager Desktop ${{ github.ref_name }} (Tauri v2)
 
-            Native desktop application for managing AWS Route53 DNS records, EC2 Security Group inbound rules, S3 buckets & objects (with scoped IAM user creation, key revoke/recreate, multiple read keys & single write key, and QR code export), Amazon SES identities (domains & email addresses), and AWS credential profiles.
+            Native desktop application for managing AWS Route53 DNS records, EC2 Instances & Elastic IPs (with instance state, public/private/Elastic IPs, start/stop/reboot, persistent Reboot Lock protection, and Elastic IP allocation/association), EC2 Security Group inbound rules, S3 buckets & objects (with scoped IAM user creation, key revoke/recreate, multiple read keys & single write key, and QR code export), Amazon SES identities (domains & email addresses with Route53 DKIM/DMARC/inbound MX publishing, email verification resend, per-email SMTP sender keys with QR code export, and integrated SMTP send tester), and AWS credential profiles.
 
             ### Downloads
             - **macOS (Apple Silicon):** `.dmg` disk image

@@ -8,6 +8,7 @@ interface Props {
 export const IamPermissionsGuide: React.FC<Props> = ({ defaultExpanded = false }) => {
   const [expanded, setExpanded] = useState(defaultExpanded);
   const [includeRoute53, setIncludeRoute53] = useState(true);
+  const [includeEc2Instances, setIncludeEc2Instances] = useState(true);
   const [includeEc2, setIncludeEc2] = useState(true);
   const [includeS3, setIncludeS3] = useState(true);
   const [includeIamBucketUsers, setIncludeIamBucketUsers] = useState(true);
@@ -22,6 +23,26 @@ export const IamPermissionsGuide: React.FC<Props> = ({ defaultExpanded = false }
 
     if (includeRoute53) {
       wildcardActions.push('route53:ListHostedZones');
+    }
+
+    if (includeEc2Instances) {
+      wildcardActions.push(
+        ...(readOnly
+          ? ['ec2:DescribeInstances', 'ec2:DescribeAddresses']
+          : [
+              'ec2:DescribeInstances',
+              'ec2:DescribeAddresses',
+              'ec2:RebootInstances',
+              'ec2:StartInstances',
+              'ec2:StopInstances',
+              'ec2:CreateTags',
+              'ec2:DeleteTags',
+              'ec2:AllocateAddress',
+              'ec2:AssociateAddress',
+              'ec2:DisassociateAddress',
+              'ec2:ReleaseAddress',
+            ])
+      );
     }
 
     if (includeEc2) {
@@ -118,10 +139,7 @@ export const IamPermissionsGuide: React.FC<Props> = ({ defaultExpanded = false }
           'iam:PutUserPolicy',
           'iam:ListUserPolicies',
           'iam:DeleteUserPolicy',
-          'iam:CreateAccessKey',
-          'iam:ListAccessKeys',
-          'iam:DeleteAccessKey',
-          'iam:GetAccessKeyLastUsed',
+          'iam:*AccessKey*',
         ],
         Resource: scopedIamResources.length === 1 ? scopedIamResources[0] : scopedIamResources,
       });
@@ -137,6 +155,7 @@ export const IamPermissionsGuide: React.FC<Props> = ({ defaultExpanded = false }
     );
   }, [
     includeRoute53,
+    includeEc2Instances,
     includeEc2,
     includeS3,
     includeIamBucketUsers,
@@ -192,6 +211,14 @@ export const IamPermissionsGuide: React.FC<Props> = ({ defaultExpanded = false }
                 onChange={(e) => setIncludeRoute53(e.target.checked)}
               />
               <span>Route53 DNS</span>
+            </label>
+            <label className="perm-check">
+              <input
+                type="checkbox"
+                checked={includeEc2Instances}
+                onChange={(e) => setIncludeEc2Instances(e.target.checked)}
+              />
+              <span>EC2 Instances &amp; Elastic IPs</span>
             </label>
             <label className="perm-check">
               <input
