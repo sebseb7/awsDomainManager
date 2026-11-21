@@ -3,5 +3,7 @@ dist/
 desktop/node_modules/
 desktop/dist/
 desktop/src-tauri/target/
+desktop/src-tauri/gen/schemas/
+desktop/src-tauri/Cargo.lock
 test-results/
 playwright-report/
