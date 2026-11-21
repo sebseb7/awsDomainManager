@@ -1,0 +1,171 @@
+import { mkdirSync } from 'fs';
+import React from 'react';
+import { test, expect } from '@playwright/test';
+import App from '../src/components/App.jsx';
+import {
+  renderInkToAnsi,
+  screenshotAnsiTerminal,
+  stripAnsi,
+} from './helpers/tuiRenderer.mjs';
+import {
+  DUMMY_PROFILES,
+  DUMMY_HOSTED_ZONES,
+  DUMMY_DNS_RECORDS,
+  DUMMY_BUCKETS,
+  DUMMY_BUCKET_IAM_USERS,
+  DUMMY_RECREATED_CREDENTIAL,
+} from './fixtures/dummyData.mjs';
+
+mkdirSync('docs', { recursive: true });
+
+const BASE_TUI_PROPS = {
+  screen: 'resource',
+  setScreen: () => {},
+  accounts: DUMMY_PROFILES,
+  selectedAccount: DUMMY_PROFILES[0],
+  setSelectedAccount: () => {},
+  hostedZones: DUMMY_HOSTED_ZONES,
+  selectedZone: DUMMY_HOSTED_ZONES[0],
+  setSelectedZone: () => {},
+  records: DUMMY_DNS_RECORDS,
+  loading: false,
+  error: null,
+  showAddRecord: false,
+  setShowAddRecord: () => {},
+  newRecord: { name: '', value: '', ttl: 300, type: 'A' },
+  setNewRecord: () => {},
+  addRecord: () => {},
+  selectedRecordIndex: 1,
+  showDeleteConfirm: false,
+  setShowDeleteConfirm: () => {},
+  deleteRecord: () => {},
+  selectedResource: { id: 'route53', name: 'Route53 DNS' },
+  setSelectedResource: () => {},
+  securityGroups: [],
+  selectedGroup: null,
+  setSelectedGroup: () => {},
+  rules: [],
+  showAddRule: false,
+  setShowAddRule: () => {},
+  ruleData: {},
+  setRuleData: () => {},
+  addRule: () => {},
+  selectedRuleIndex: 0,
+  deleteRule: () => {},
+  selectedAccountIndex: 0,
+  accountFormMode: null,
+  editingProfile: null,
+  accountFormData: {},
+  setAccountFormData: () => {},
+  saveAccount: () => {},
+  cancelAccountForm: () => {},
+  statusMessage: null,
+  buckets: DUMMY_BUCKETS,
+  selectedBucket: DUMMY_BUCKETS[0],
+  selectedBucketIndex: 0,
+  showAddBucket: false,
+  setShowAddBucket: () => {},
+  bucketFormData: {},
+  setBucketFormData: () => {},
+  addBucket: () => {},
+  createdIamResult: null,
+  dismissCreatedIamResult: () => {},
+  bucketPrefix: '',
+  objects: [],
+  selectedObjectIndex: 0,
+  objectFormMode: null,
+  objectFormData: {},
+  setObjectFormData: () => {},
+  submitObjectForm: () => {},
+  cancelObjectForm: () => {},
+  bucketRegion: 'eu-central-1',
+  bucketKeys: DUMMY_BUCKET_IAM_USERS.map((u) => ({
+    ...u,
+    createdAt: u.createdAt.slice(0, 16).replace('T', ' '),
+  })),
+  selectedKeyIndex: 0,
+  addKeyRole: null,
+  addKeyUserName: '',
+  setAddKeyUserName: () => {},
+  submitAddBucketKey: () => {},
+  cancelAddBucketKey: () => {},
+  keyConfirmAction: null,
+};
+
+test('TUI: Route53 DNS Records screenshot', async ({ page }) => {
+  const ansi = await renderInkToAnsi(
+    <App
+      {...BASE_TUI_PROPS}
+      screen="records"
+      selectedResource={{ id: 'route53', name: 'Route53 DNS' }}
+    />,
+    { columns: 104, rows: 28 }
+  );
+
+  const plain = stripAnsi(ansi);
+  expect(plain).toContain('Route53 DNS Record Manager');
+  expect(plain).toContain('example.com.');
+  expect(plain).toContain('203.0.113.10');
+
+  await screenshotAnsiTerminal(
+    page,
+    ansi,
+    'docs/tui-route53.png',
+    'aws-domain-manager — Route53 DNS Records'
+  );
+});
+
+test('TUI: S3 Bucket IAM Keys (Write 1/1 + multiple Read keys) screenshot', async ({ page }) => {
+  const ansi = await renderInkToAnsi(
+    <App
+      {...BASE_TUI_PROPS}
+      screen="s3-keys"
+      selectedResource={{ id: 's3', name: 'S3 Buckets' }}
+      selectedKeyIndex={0}
+    />,
+    { columns: 108, rows: 26 }
+  );
+
+  const plain = stripAnsi(ansi);
+  expect(plain).toContain('S3 Bucket Manager');
+  expect(plain).toContain('Write (Put-Only): 1/1');
+  expect(plain).toContain('Read (Read-Only): 3');
+  expect(plain).toContain('acme-backups-prod-put');
+  expect(plain).toContain('audit-reader-eu');
+
+  await screenshotAnsiTerminal(
+    page,
+    ansi,
+    'docs/tui-s3-keys.png',
+    'aws-domain-manager — S3 Bucket IAM Keys'
+  );
+});
+
+test('TUI: Recreated IAM Key with terminal QR code screenshot', async ({ page }) => {
+  const ansi = await renderInkToAnsi(
+    <App
+      {...BASE_TUI_PROPS}
+      screen="s3-keys"
+      selectedResource={{ id: 's3', name: 'S3 Buckets' }}
+      createdIamResult={{
+        bucketName: 'acme-backups-prod',
+        region: 'eu-central-1',
+        users: [DUMMY_RECREATED_CREDENTIAL],
+        isScopedIamUsers: true,
+        title: 'IAM key recreated for "acme-backups-prod-put" (acme-backups-prod)',
+      }}
+    />,
+    { columns: 112, rows: 44 }
+  );
+
+  const plain = stripAnsi(ansi);
+  expect(plain).toContain('AKIAWRITE9999ROTATED');
+  expect(plain).toContain('Save these credentials now');
+
+  await screenshotAnsiTerminal(
+    page,
+    ansi,
+    'docs/tui-s3-qr.png',
+    'aws-domain-manager — Recreated IAM Key & QR Code'
+  );
+});

@@ -3,7 +3,35 @@
 [![CI Build](https://github.com/sebseb7/awsDomainManager/actions/workflows/ci.yml/badge.svg)](https://github.com/sebseb7/awsDomainManager/actions/workflows/ci.yml)
 [![Release Desktop App](https://github.com/sebseb7/awsDomainManager/actions/workflows/release.yml/badge.svg)](https://github.com/sebseb7/awsDomainManager/actions/workflows/release.yml)
 
-A terminal-based UI tool built with React and Ink for managing AWS resources across multiple accounts.
+A terminal-based and native desktop UI tool for managing AWS Route53, EC2 Security Groups, S3 Buckets (with scoped IAM key management), and AWS credential profiles across multiple accounts.
+
+## Screenshots
+
+### Desktop App (Tauri v2)
+
+| Route53 DNS Records | EC2 Security Groups |
+| :---: | :---: |
+| ![Desktop Route53](docs/desktop-route53.png) | ![Desktop EC2](docs/desktop-ec2.png) |
+
+| S3 Bucket IAM Keys (Single Write + Multiple Read) | Recreated IAM Key & QR Code |
+| :---: | :---: |
+| ![Desktop S3 IAM Keys](docs/desktop-s3-keys.png) | ![Desktop S3 QR Credentials](docs/desktop-s3-qr.png) |
+
+| AWS Accounts & Minimum IAM Permissions Guide |
+| :---: |
+| ![Desktop Accounts](docs/desktop-accounts.png) |
+
+### Terminal UI (TUI)
+
+| Route53 DNS Records | S3 Bucket IAM Keys |
+| :---: | :---: |
+| ![TUI Route53](docs/tui-route53.png) | ![TUI S3 IAM Keys](docs/tui-s3-keys.png) |
+
+| Recreated IAM Key & Terminal QR Code |
+| :---: |
+| ![TUI S3 QR Credentials](docs/tui-s3-qr.png) |
+
+> Screenshots are generated automatically with dummy data by running `npm test` (Playwright + Ink).
 
 ## Usage
 
