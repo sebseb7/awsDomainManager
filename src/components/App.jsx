@@ -1,5 +1,6 @@
 import React from 'react';
 import { Box, Text } from 'ink';
+import TextInput from 'ink-text-input';
 import ResourceScreen from './screens/ResourceScreen.jsx';
 import AccountScreen from './screens/AccountScreen.jsx';
 import ZoneScreen from './screens/ZoneScreen.jsx';
@@ -60,12 +61,23 @@ const App = (props) => {
     selectedRuleIndex,
     deleteRule,
     selectedAccountIndex,
+    authStatus,
+    pinUnlockInput,
+    setPinUnlockInput,
+    submitPinUnlock,
     accountFormMode,
     editingProfile,
     accountFormData,
     setAccountFormData,
     saveAccount,
     cancelAccountForm,
+    showPinSetupModal,
+    pinSetupInput,
+    setPinSetupInput,
+    pinSetupConfirmInput,
+    setPinSetupConfirmInput,
+    submitPinSetup,
+    cancelPinSetup,
     statusMessage,
     buckets,
     selectedBucket,
@@ -147,6 +159,46 @@ const App = (props) => {
 
   const renderScreen = () => {
     switch (screen) {
+      case 'pin-unlock':
+        return (
+          <Box flexDirection="column" borderStyle="round" borderColor="yellow" padding={1}>
+            <Text bold color="yellow">
+              Unlock PIN-Encrypted Auth Vault
+            </Text>
+            <Box marginTop={1}>
+              <Text>
+                AWS credentials are encrypted with your 6-digit PIN. Enter your PIN to verify the
+                salted hash and unlock your accounts.
+              </Text>
+            </Box>
+            <Box marginTop={1}>
+              <Text dimColor>
+                Vault: {authStatus?.vaultPath || '~/.aws-domain-manager/auth.enc.json'}
+                {authStatus?.pinHashPreview
+                  ? ` | Salted Hash: ${authStatus.pinHashPreview} (Salt: ${authStatus.saltPreview || '16B'})`
+                  : ''}
+              </Text>
+            </Box>
+            <Box marginTop={1}>
+              <Text color="cyan" bold>
+                6-Digit PIN:{' '}
+              </Text>
+              <TextInput
+                value={pinUnlockInput || ''}
+                placeholder="••••••"
+                mask="*"
+                focus
+                showCursor
+                onChange={(val) => setPinUnlockInput?.(val.replace(/\D/g, '').slice(0, 6))}
+                onSubmit={(val) => submitPinUnlock?.(val)}
+              />
+            </Box>
+            <Box marginTop={1}>
+              <Text dimColor>Enter your 6-digit PIN and press Enter to unlock, or Esc to exit</Text>
+            </Box>
+          </Box>
+        );
+
       case 'resource':
         return (
           <ResourceScreen
@@ -233,6 +285,7 @@ const App = (props) => {
         return (
           <ManageAccountsScreen
             accounts={accounts}
+            authStatus={authStatus}
             selectedAccountIndex={selectedAccountIndex}
             accountFormMode={accountFormMode}
             editingProfile={editingProfile}
@@ -240,6 +293,13 @@ const App = (props) => {
             setAccountFormData={setAccountFormData}
             saveAccount={saveAccount}
             cancelAccountForm={cancelAccountForm}
+            showPinSetupModal={showPinSetupModal}
+            pinSetupInput={pinSetupInput}
+            setPinSetupInput={setPinSetupInput}
+            pinSetupConfirmInput={pinSetupConfirmInput}
+            setPinSetupConfirmInput={setPinSetupConfirmInput}
+            submitPinSetup={submitPinSetup}
+            cancelPinSetup={cancelPinSetup}
             showDeleteConfirm={showDeleteConfirm}
             statusMessage={statusMessage}
           />

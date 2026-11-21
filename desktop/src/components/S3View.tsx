@@ -85,7 +85,7 @@ export const S3View: React.FC<Props> = ({ account, onError, onSuccess }) => {
     setSearch('');
     setBucketRegion(account.region || 'us-east-1');
     loadBuckets();
-  }, [account.profile]);
+  }, [account.profile, account.region]);
 
   const handleOpenBucket = (name: string) => {
     setSelectedBucket(name);

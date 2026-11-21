@@ -22,10 +22,21 @@ import { fromIni } from '@aws-sdk/credential-provider-ini';
  * @param {string} [regionOverride] - Optional region override
  * @returns {S3Client} S3 client instance
  */
+const buildAccountCredentials = (account) => {
+  if (account?.accessKeyId && account?.secretAccessKey) {
+    return {
+      accessKeyId: account.accessKeyId,
+      secretAccessKey: account.secretAccessKey,
+      ...(account.sessionToken ? { sessionToken: account.sessionToken } : {}),
+    };
+  }
+  return fromIni({ profile: account?.profile });
+};
+
 const createS3Client = (account, regionOverride) => {
   return new S3Client({
     region: regionOverride || account.region || 'us-east-1',
-    credentials: fromIni({ profile: account.profile }),
+    credentials: buildAccountCredentials(account),
     followRegionRedirects: true,
   });
 };

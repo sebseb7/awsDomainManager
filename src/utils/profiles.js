@@ -1,14 +1,147 @@
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs';
+import crypto from 'crypto';
+import { readFileSync, writeFileSync, existsSync, mkdirSync, unlinkSync } from 'fs';
 import { homedir } from 'os';
 import { join } from 'path';
 
 const DEFAULT_REGION = 'us-east-1';
+const PBKDF2_ITERATIONS = 100000;
+const VAULT_VERSION = 1;
+const KDF_NAME = 'pbkdf2-hmac-sha256';
+export const VAULT_DISPLAY_PATH = '~/.aws-domain-manager/auth.enc.json';
 
-const getAwsPaths = (awsDir = join(homedir(), '.aws')) => ({
-  awsDir,
-  credentialsPath: join(awsDir, 'credentials'),
-  configPath: join(awsDir, 'config'),
-});
+let sessionPin = null;
+let sessionCache = null; // { pin, vaultMac, profiles }
+
+const readLegacyAwsConfigRegions = () => {
+  const regions = {};
+  let defaultRegion = null;
+  try {
+    const configPath = join(homedir(), '.aws', 'config');
+    if (!existsSync(configPath)) return { regions, defaultRegion };
+    const content = readFileSync(configPath, 'utf8');
+    let currentProfile = null;
+    for (const rawLine of content.split(/\r?\n/)) {
+      const line = rawLine.trim();
+      if (!line || line.startsWith('#') || line.startsWith(';')) continue;
+      if (line.startsWith('[') && line.endsWith(']')) {
+        const inner = line.slice(1, -1).trim();
+        if (inner === 'default') {
+          currentProfile = 'default';
+        } else {
+          const match = inner.match(/^profile\s+(.+)$/);
+          currentProfile = match ? match[1].trim() : null;
+        }
+        continue;
+      }
+      const kv = line.match(/^([a-zA-Z0-9_-]+)\s*=\s*(.*)$/);
+      if (currentProfile && kv && kv[1] === 'region') {
+        const reg = kv[2].trim();
+        if (reg) {
+          if (currentProfile === 'default') defaultRegion = reg;
+          regions[currentProfile] = reg;
+        }
+      }
+    }
+  } catch {
+    // ignore
+  }
+  return { regions, defaultRegion };
+};
+
+const readLegacyAwsCredentials = () => {
+  const profiles = [];
+  try {
+    const credPath = join(homedir(), '.aws', 'credentials');
+    if (!existsSync(credPath)) return profiles;
+    const content = readFileSync(credPath, 'utf8');
+    const { regions: configRegions, defaultRegion } = readLegacyAwsConfigRegions();
+    let currentName = null;
+    let currentKv = {};
+
+    const flush = () => {
+      if (currentName) {
+        const ak = currentKv.aws_access_key_id || '';
+        const sk = currentKv.aws_secret_access_key || '';
+        if (ak && sk) {
+          const region =
+            configRegions[currentName] || currentKv.region || defaultRegion || DEFAULT_REGION;
+          profiles.push({
+            profile: currentName,
+            region,
+            accessKeyId: ak,
+            secretAccessKey: sk,
+            sessionToken: currentKv.aws_session_token || '',
+          });
+        }
+      }
+    };
+
+    for (const rawLine of content.split(/\r?\n/)) {
+      const line = rawLine.trim();
+      if (!line || line.startsWith('#') || line.startsWith(';')) continue;
+      if (line.startsWith('[') && line.endsWith(']') && line.length >= 3) {
+        flush();
+        currentName = line.slice(1, -1).trim() || null;
+        currentKv = {};
+        continue;
+      }
+      const kv = line.match(/^([a-zA-Z0-9_-]+)\s*=\s*(.*)$/);
+      if (kv) {
+        currentKv[kv[1]] = kv[2].trim();
+      }
+    }
+    flush();
+  } catch {
+    // ignore
+  }
+  return profiles;
+};
+
+const reconcileWithLegacyAws = (storedList) => {
+  const { regions: configRegions, defaultRegion } = readLegacyAwsConfigRegions();
+  const legacyCreds = readLegacyAwsCredentials();
+  let changed = false;
+
+  for (const item of storedList) {
+    const targetRegion = configRegions[item.profile] || defaultRegion;
+    if (
+      targetRegion &&
+      (!item.region || item.region === DEFAULT_REGION) &&
+      targetRegion !== DEFAULT_REGION
+    ) {
+      item.region = targetRegion;
+      changed = true;
+    }
+  }
+
+  for (const leg of legacyCreds) {
+    const existing = storedList.find((p) => p.profile === leg.profile);
+    if (existing) {
+      if (!existing.accessKeyId || !existing.secretAccessKey) {
+        existing.accessKeyId = leg.accessKeyId;
+        existing.secretAccessKey = leg.secretAccessKey;
+        existing.sessionToken = leg.sessionToken;
+        changed = true;
+      }
+    } else {
+      storedList.push(leg);
+      changed = true;
+    }
+  }
+
+  return changed;
+};
+
+const getVaultPaths = (vaultDir) => {
+  const resolvedDir =
+    vaultDir ||
+    (process.env.AWS_DOMAIN_MANAGER_DIR && process.env.AWS_DOMAIN_MANAGER_DIR.trim()) ||
+    join(homedir(), '.aws-domain-manager');
+  return {
+    vaultDir: resolvedDir,
+    vaultFile: join(resolvedDir, 'auth.enc.json'),
+  };
+};
 
 /**
  * Mask a sensitive credential string for safe display in the UI
@@ -19,6 +152,19 @@ export const maskCredential = (value) => {
   if (!value) return '(not set)';
   if (value.length <= 8) return '****';
   return `${value.slice(0, 4)}...${value.slice(-4)}`;
+};
+
+/**
+ * Validate a 6-digit numeric PIN
+ * @param {string} pin
+ * @returns {string}
+ */
+export const validatePin = (pin) => {
+  const trimmed = String(pin ?? '').trim();
+  if (!/^\d{6}$/.test(trimmed)) {
+    throw new Error('PIN must be exactly 6 digits (0-9).');
+  }
+  return trimmed;
 };
 
 /**
@@ -37,269 +183,284 @@ export const validateProfileName = (profileName) => {
   return trimmed;
 };
 
-const extractSectionKey = (headerLine, isConfig) => {
-  const trimmed = headerLine.trim();
-  if (isConfig) {
-    if (trimmed === '[default]') {
-      return 'default';
-    }
-    const profileMatch = trimmed.match(/^\[profile\s+([^\]]+)\]$/);
-    if (profileMatch) {
-      return profileMatch[1].trim();
-    }
-    return null;
+const hmacSha256 = (key, parts) => {
+  const mac = crypto.createHmac('sha256', key);
+  for (const part of parts) {
+    mac.update(part);
   }
-
-  const credMatch = trimmed.match(/^\[([^\]]+)\]$/);
-  if (credMatch) {
-    return credMatch[1].trim();
-  }
-  return null;
+  return mac.digest();
 };
 
-const formatSectionHeader = (profileName, isConfig) => {
-  if (isConfig) {
-    return profileName === 'default' ? '[default]' : `[profile ${profileName}]`;
-  }
-  return `[${profileName}]`;
+const deriveMasterKey = (pin, saltBuffer, iterations = PBKDF2_ITERATIONS) => {
+  return crypto.pbkdf2Sync(Buffer.from(pin, 'utf8'), saltBuffer, iterations, 32, 'sha256');
 };
 
-const parseIni = (content, isConfig) => {
-  const normalized = content.replace(/\r\n/g, '\n');
-  const rawLines = normalized.split('\n');
-  // Drop a single trailing empty line caused by final newline
-  if (rawLines.length > 0 && rawLines[rawLines.length - 1] === '') {
-    rawLines.pop();
-  }
-
-  const preamble = [];
-  const sections = [];
-  let currentSection = null;
-
-  for (const line of rawLines) {
-    const trimmed = line.trim();
-    if (/^\[[^\]]+\]$/.test(trimmed)) {
-      currentSection = {
-        header: trimmed,
-        key: extractSectionKey(trimmed, isConfig),
-        lines: [],
-      };
-      sections.push(currentSection);
-    } else if (currentSection) {
-      currentSection.lines.push(line);
-    } else {
-      preamble.push(line);
-    }
-  }
-
-  return { preamble, sections };
+const derivePinHash = (masterKey, saltBuffer) => {
+  return hmacSha256(masterKey, [Buffer.from('aws-domain-manager:pin-hash:v1:', 'utf8'), saltBuffer]);
 };
 
-const parseKeyValues = (lines) => {
-  const values = {};
-  for (const line of lines) {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith('#') || trimmed.startsWith(';')) {
-      continue;
-    }
-    const match = trimmed.match(/^([a-zA-Z0-9_-]+)\s*=\s*(.*)$/);
-    if (match) {
-      values[match[1]] = match[2].trim();
-    }
-  }
-  return values;
+const deriveEncKey = (masterKey, saltBuffer) => {
+  return hmacSha256(masterKey, [Buffer.from('aws-domain-manager:enc-key:v1:', 'utf8'), saltBuffer]);
 };
 
-const upsertSection = (doc, targetKey, newKey, updates, isConfig) => {
-  const header = formatSectionHeader(newKey, isConfig);
-  const existing = doc.sections.find((s) => s.key === targetKey);
+const deriveMacKey = (masterKey, saltBuffer) => {
+  return hmacSha256(masterKey, [Buffer.from('aws-domain-manager:mac-key:v1:', 'utf8'), saltBuffer]);
+};
 
-  if (existing) {
-    existing.header = header;
-    existing.key = newKey;
-    const handled = new Set();
-    const nextLines = [];
+const computeMac = (macKey, saltBuffer, ivBuffer, ciphertextBuffer) => {
+  return hmacSha256(macKey, [
+    Buffer.from('aws-domain-manager:mac:v1:', 'utf8'),
+    saltBuffer,
+    ivBuffer,
+    ciphertextBuffer,
+  ]);
+};
 
-    for (const line of existing.lines) {
-      const trimmed = line.trim();
-      const match = trimmed.match(/^([a-zA-Z0-9_-]+)\s*=\s*(.*)$/);
-      if (match && Object.prototype.hasOwnProperty.call(updates, match[1])) {
-        const key = match[1];
-        if (!handled.has(key)) {
-          handled.add(key);
-          if (updates[key] !== null && updates[key] !== undefined && updates[key] !== '') {
-            nextLines.push(`${key} = ${updates[key]}`);
-          }
-        }
-      } else {
-        nextLines.push(line);
-      }
-    }
-
-    // Find insertion index before trailing blank lines
-    let insertIdx = nextLines.length;
-    while (insertIdx > 0 && nextLines[insertIdx - 1].trim() === '') {
-      insertIdx--;
-    }
-
-    const toInsert = [];
-    for (const [key, val] of Object.entries(updates)) {
-      if (!handled.has(key) && val !== null && val !== undefined && val !== '') {
-        toInsert.push(`${key} = ${val}`);
-      }
-    }
-
-    if (toInsert.length > 0) {
-      nextLines.splice(insertIdx, 0, ...toInsert);
-    }
-
-    existing.lines = nextLines;
-    return;
+const constantTimeEqual = (a, b) => {
+  if (!Buffer.isBuffer(a) || !Buffer.isBuffer(b) || a.length !== b.length) {
+    return false;
   }
+  return crypto.timingSafeEqual(a, b);
+};
 
-  // Append new section
-  const newLines = [];
-  for (const [key, val] of Object.entries(updates)) {
-    if (val !== null && val !== undefined && val !== '') {
-      newLines.push(`${key} = ${val}`);
+const xorKeystream = (encKey, ivBuffer, dataBuffer) => {
+  const out = Buffer.alloc(dataBuffer.length);
+  const totalChunks = Math.ceil(dataBuffer.length / 32);
+  for (let chunkIdx = 0; chunkIdx < totalChunks; chunkIdx++) {
+    const counterBuf = Buffer.alloc(4);
+    counterBuf.writeUInt32BE(chunkIdx, 0);
+    const keystream = hmacSha256(encKey, [ivBuffer, counterBuf]);
+    const start = chunkIdx * 32;
+    const end = Math.min(start + 32, dataBuffer.length);
+    for (let i = start; i < end; i++) {
+      out[i] = dataBuffer[i] ^ keystream[i - start];
     }
   }
+  return out;
+};
 
-  doc.sections.push({
-    header,
-    key: newKey,
-    lines: newLines,
+const formatPreview = (b64, len) => {
+  const trimmed = String(b64 || '').trim();
+  if (trimmed.length <= len) return trimmed;
+  return `${trimmed.slice(0, len)}...`;
+};
+
+const toAwsProfiles = (storedList) => {
+  return (storedList || []).map((p, idx) => ({
+    id: `account-${idx + 1}`,
+    name: p.profile.charAt(0).toUpperCase() + p.profile.slice(1),
+    profile: p.profile,
+    region: (p.region || '').trim() || DEFAULT_REGION,
+    accessKeyId: p.accessKeyId || '',
+    secretAccessKey: p.secretAccessKey || '',
+    sessionToken: p.sessionToken || '',
+  }));
+};
+
+const readVaultFile = (vaultFile) => {
+  const content = readFileSync(vaultFile, 'utf8');
+  return JSON.parse(content);
+};
+
+const writeVaultFile = (paths, vault) => {
+  if (!existsSync(paths.vaultDir)) {
+    mkdirSync(paths.vaultDir, { recursive: true, mode: 0o700 });
+  }
+  writeFileSync(paths.vaultFile, `${JSON.stringify(vault, null, 2)}\n`, {
+    encoding: 'utf8',
+    mode: 0o600,
   });
 };
 
-const removeSection = (doc, targetKey) => {
-  doc.sections = doc.sections.filter((s) => s.key !== targetKey);
+export const encryptProfilesToVault = (profiles, pin, existingSaltBuffer = null) => {
+  const validPin = validatePin(pin);
+  const saltBuffer =
+    existingSaltBuffer && existingSaltBuffer.length >= 16
+      ? existingSaltBuffer
+      : crypto.randomBytes(16);
+  const ivBuffer = crypto.randomBytes(16);
+
+  const masterKey = deriveMasterKey(validPin, saltBuffer, PBKDF2_ITERATIONS);
+  const pinHash = derivePinHash(masterKey, saltBuffer);
+  const encKey = deriveEncKey(masterKey, saltBuffer);
+  const macKey = deriveMacKey(masterKey, saltBuffer);
+
+  const plaintext = Buffer.from(JSON.stringify(profiles), 'utf8');
+  const ciphertext = xorKeystream(encKey, ivBuffer, plaintext);
+  const mac = computeMac(macKey, saltBuffer, ivBuffer, ciphertext);
+
+  return {
+    version: VAULT_VERSION,
+    kdf: KDF_NAME,
+    iterations: PBKDF2_ITERATIONS,
+    salt: saltBuffer.toString('base64'),
+    pinHash: pinHash.toString('base64'),
+    iv: ivBuffer.toString('base64'),
+    ciphertext: ciphertext.toString('base64'),
+    mac: mac.toString('base64'),
+  };
 };
 
-const serializeIni = (doc) => {
-  const outputLines = [];
+export const verifyPinAgainstVault = (vault, pin) => {
+  const validPin = validatePin(pin);
+  const saltBuffer = Buffer.from(vault.salt, 'base64');
+  const storedPinHash = Buffer.from(vault.pinHash, 'base64');
+  const iterations = vault.iterations > 0 ? vault.iterations : PBKDF2_ITERATIONS;
 
-  const trimmedPreamble = [...doc.preamble];
-  while (trimmedPreamble.length > 0 && trimmedPreamble[trimmedPreamble.length - 1].trim() === '') {
-    trimmedPreamble.pop();
-  }
-  if (trimmedPreamble.length > 0) {
-    outputLines.push(...trimmedPreamble);
-  }
-
-  for (const section of doc.sections) {
-    if (outputLines.length > 0 && outputLines[outputLines.length - 1].trim() !== '') {
-      outputLines.push('');
-    }
-    outputLines.push(section.header);
-
-    const sectionLines = [...section.lines];
-    while (sectionLines.length > 0 && sectionLines[sectionLines.length - 1].trim() === '') {
-      sectionLines.pop();
-    }
-    outputLines.push(...sectionLines);
-  }
-
-  if (outputLines.length === 0) {
-    return '';
-  }
-
-  return `${outputLines.join('\n')}\n`;
+  const masterKey = deriveMasterKey(validPin, saltBuffer, iterations);
+  const computedPinHash = derivePinHash(masterKey, saltBuffer);
+  return constantTimeEqual(computedPinHash, storedPinHash);
 };
 
-const readIniFile = (filePath, isConfig) => {
-  if (!existsSync(filePath)) {
-    return { preamble: [], sections: [] };
-  }
-  const content = readFileSync(filePath, 'utf8');
-  return parseIni(content, isConfig);
-};
+export const decryptProfilesFromVault = (vault, pin) => {
+  const validPin = validatePin(pin);
+  const saltBuffer = Buffer.from(vault.salt, 'base64');
+  const storedPinHash = Buffer.from(vault.pinHash, 'base64');
+  const ivBuffer = Buffer.from(vault.iv, 'base64');
+  const ciphertextBuffer = Buffer.from(vault.ciphertext, 'base64');
+  const storedMac = Buffer.from(vault.mac, 'base64');
+  const iterations = vault.iterations > 0 ? vault.iterations : PBKDF2_ITERATIONS;
 
-const writeIniFile = (awsDir, filePath, doc) => {
-  if (!existsSync(awsDir)) {
-    mkdirSync(awsDir, { recursive: true, mode: 0o700 });
+  const masterKey = deriveMasterKey(validPin, saltBuffer, iterations);
+  const computedPinHash = derivePinHash(masterKey, saltBuffer);
+
+  if (!constantTimeEqual(computedPinHash, storedPinHash)) {
+    throw new Error('Incorrect 6-digit PIN. Salted PIN hash verification failed.');
   }
-  writeFileSync(filePath, serializeIni(doc), { encoding: 'utf8', mode: 0o600 });
+
+  const encKey = deriveEncKey(masterKey, saltBuffer);
+  const macKey = deriveMacKey(masterKey, saltBuffer);
+  const computedMac = computeMac(macKey, saltBuffer, ivBuffer, ciphertextBuffer);
+
+  if (!constantTimeEqual(computedMac, storedMac)) {
+    throw new Error('Encrypted auth data integrity check (HMAC) failed.');
+  }
+
+  const plaintext = xorKeystream(encKey, ivBuffer, ciphertextBuffer);
+  const stored = JSON.parse(plaintext.toString('utf8'));
+  return { stored, saltBuffer };
 };
 
 /**
- * Parse AWS config file and extract region per profile
- * @param {string} [awsDir]
- * @returns {Object} Map of profile name to region
+ * Get the current PIN-encrypted auth vault status
+ * @param {string} [vaultDir]
+ * @returns {{ hasPin: boolean, unlocked: boolean, vaultPath: string, saltPreview: string|null, pinHashPreview: string|null }}
  */
-const getProfileRegions = (awsDir) => {
-  const { configPath } = getAwsPaths(awsDir);
-  const regions = {};
-
-  if (!existsSync(configPath)) {
-    return regions;
+export const getAuthStatus = (vaultDir) => {
+  const paths = getVaultPaths(vaultDir);
+  if (!existsSync(paths.vaultFile)) {
+    return {
+      hasPin: false,
+      unlocked: true,
+      vaultPath: VAULT_DISPLAY_PATH,
+      saltPreview: null,
+      pinHashPreview: null,
+    };
   }
 
   try {
-    const doc = readIniFile(configPath, true);
-    for (const section of doc.sections) {
-      if (!section.key) continue;
-      const kv = parseKeyValues(section.lines);
-      if (kv.region) {
-        regions[section.key] = kv.region;
-      }
-    }
-  } catch (err) {
-    // Silently ignore config parse errors
+    const vault = readVaultFile(paths.vaultFile);
+    const unlocked =
+      sessionCache && sessionCache.vaultMac === vault.mac
+        ? true
+        : sessionPin
+          ? verifyPinAgainstVault(vault, sessionPin)
+          : false;
+    return {
+      hasPin: true,
+      unlocked,
+      vaultPath: VAULT_DISPLAY_PATH,
+      saltPreview: formatPreview(vault.salt, 8),
+      pinHashPreview: formatPreview(vault.pinHash, 12),
+    };
+  } catch {
+    return {
+      hasPin: true,
+      unlocked: false,
+      vaultPath: VAULT_DISPLAY_PATH,
+      saltPreview: null,
+      pinHashPreview: null,
+    };
   }
-
-  return regions;
 };
 
 /**
- * Parse AWS credentials file and extract profile objects
- * @param {string} [awsDir]
+ * Verify a 6-digit PIN against the stored salted PIN hash and unlock the auth vault for this session
+ * @param {string} pin
+ * @param {string} [vaultDir]
+ * @returns {Array} Decrypted AWS profiles
+ */
+export const unlockWithPin = (pin, vaultDir) => {
+  const validPin = validatePin(pin);
+  const paths = getVaultPaths(vaultDir);
+  if (!existsSync(paths.vaultFile)) {
+    sessionPin = validPin;
+    sessionCache = { pin: validPin, vaultMac: '', profiles: [] };
+    return [];
+  }
+
+  let vault = readVaultFile(paths.vaultFile);
+  const { stored, saltBuffer } = decryptProfilesFromVault(vault, validPin);
+
+  if (!vaultDir && !process.env.AWS_DOMAIN_MANAGER_DIR) {
+    if (reconcileWithLegacyAws(stored)) {
+      vault = encryptProfilesToVault(stored, validPin, saltBuffer);
+      writeVaultFile(paths, vault);
+    }
+  }
+
+  sessionPin = validPin;
+  const profiles = toAwsProfiles(stored);
+  sessionCache = { pin: validPin, vaultMac: vault.mac, profiles };
+  return profiles;
+};
+
+/**
+ * Lock the in-memory auth session so the 6-digit PIN is required again
+ * @param {string} [vaultDir]
+ */
+export const lockAuthSession = (vaultDir) => {
+  sessionPin = null;
+  sessionCache = null;
+  return getAuthStatus(vaultDir);
+};
+
+/**
+ * Read and decrypt AWS account profiles using the unlocked session PIN
+ * @param {string} [vaultDir]
+ * @param {string} [pinOverride]
  * @returns {Array} Array of AWS account profile objects
  */
-export const getAwsProfiles = (awsDir) => {
-  const { credentialsPath } = getAwsPaths(awsDir);
-
-  if (!existsSync(credentialsPath)) {
+export const getAwsProfiles = (vaultDir, pinOverride) => {
+  const paths = getVaultPaths(vaultDir);
+  if (!existsSync(paths.vaultFile)) {
     return [];
   }
 
-  const profileRegions = getProfileRegions(awsDir);
-
-  try {
-    const doc = readIniFile(credentialsPath, false);
-    const profiles = [];
-
-    for (const section of doc.sections) {
-      if (!section.key) continue;
-      const profileName = section.key;
-      const kv = parseKeyValues(section.lines);
-      const region = profileRegions[profileName] || kv.region || DEFAULT_REGION;
-
-      profiles.push({
-        id: `account-${profiles.length + 1}`,
-        name: profileName.charAt(0).toUpperCase() + profileName.slice(1),
-        profile: profileName,
-        region,
-        accessKeyId: kv.aws_access_key_id || '',
-        secretAccessKey: kv.aws_secret_access_key || '',
-        sessionToken: kv.aws_session_token || '',
-      });
-    }
-
-    return profiles;
-  } catch (err) {
-    console.error('Error reading AWS credentials:', err);
+  const activePin = pinOverride || sessionPin;
+  if (!activePin) {
     return [];
   }
+
+  const vault = readVaultFile(paths.vaultFile);
+  if (!pinOverride && sessionCache && sessionCache.vaultMac === vault.mac) {
+    return sessionCache.profiles;
+  }
+
+  const { stored } = decryptProfilesFromVault(vault, activePin);
+  const profiles = toAwsProfiles(stored);
+  sessionCache = { pin: activePin, vaultMac: vault.mac, profiles };
+  return profiles;
 };
 
 /**
- * Add a new AWS account profile to ~/.aws/credentials and ~/.aws/config
+ * Add a new AWS account profile to the PIN-encrypted auth vault
  * @param {Object} accountData
- * @param {string} [awsDir]
+ * @param {string} [vaultDir]
+ * @param {string} [pinOverride]
  * @returns {Array} Updated list of AWS account profiles
  */
-export const addAwsProfile = (accountData, awsDir) => {
+export const addAwsProfile = (accountData, vaultDir, pinOverride) => {
   const profileName = validateProfileName(accountData.profile);
   const accessKeyId = (accountData.accessKeyId || '').trim();
   const secretAccessKey = (accountData.secretAccessKey || '').trim();
@@ -313,41 +474,74 @@ export const addAwsProfile = (accountData, awsDir) => {
     throw new Error('Secret Access Key is required.');
   }
 
-  const paths = getAwsPaths(awsDir);
-  const credDoc = readIniFile(paths.credentialsPath, false);
+  const paths = getVaultPaths(vaultDir);
 
-  if (credDoc.sections.some((s) => s.key === profileName)) {
+  if (!existsSync(paths.vaultFile)) {
+    const rawPin = pinOverride || accountData.pin || sessionPin;
+    if (!rawPin) {
+      throw new Error(
+        'A 6-digit PIN is required when creating the first account to encrypt auth data.'
+      );
+    }
+    const validPin = validatePin(rawPin);
+    const stored = [
+      {
+        profile: profileName,
+        region,
+        accessKeyId,
+        secretAccessKey,
+        sessionToken,
+      },
+    ];
+    if (!vaultDir && !process.env.AWS_DOMAIN_MANAGER_DIR) {
+      reconcileWithLegacyAws(stored);
+    }
+    const vault = encryptProfilesToVault(stored, validPin, null);
+    writeVaultFile(paths, vault);
+    sessionPin = validPin;
+    const profiles = toAwsProfiles(stored);
+    sessionCache = { pin: validPin, vaultMac: vault.mac, profiles };
+    return profiles;
+  }
+
+  const rawPin = pinOverride || accountData.pin || sessionPin;
+  if (!rawPin) {
+    throw new Error('Auth vault is locked. Enter your 6-digit PIN to unlock.');
+  }
+  const activePin = validatePin(rawPin);
+  const existingVault = readVaultFile(paths.vaultFile);
+  const { stored, saltBuffer } = decryptProfilesFromVault(existingVault, activePin);
+
+  if (stored.some((p) => p.profile === profileName)) {
     throw new Error(`Profile "${profileName}" already exists.`);
   }
 
-  upsertSection(
-    credDoc,
-    profileName,
-    profileName,
-    {
-      aws_access_key_id: accessKeyId,
-      aws_secret_access_key: secretAccessKey,
-      aws_session_token: sessionToken || null,
-    },
-    false
-  );
-  writeIniFile(paths.awsDir, paths.credentialsPath, credDoc);
+  stored.push({
+    profile: profileName,
+    region,
+    accessKeyId,
+    secretAccessKey,
+    sessionToken,
+  });
 
-  const configDoc = readIniFile(paths.configPath, true);
-  upsertSection(configDoc, profileName, profileName, { region }, true);
-  writeIniFile(paths.awsDir, paths.configPath, configDoc);
+  const updatedVault = encryptProfilesToVault(stored, activePin, saltBuffer);
+  writeVaultFile(paths, updatedVault);
+  sessionPin = activePin;
+  const profiles = toAwsProfiles(stored);
+  sessionCache = { pin: activePin, vaultMac: updatedVault.mac, profiles };
 
-  return getAwsProfiles(awsDir);
+  return profiles;
 };
 
 /**
- * Update an existing AWS account profile in ~/.aws/credentials and ~/.aws/config
+ * Update an existing AWS account profile in the PIN-encrypted auth vault
  * @param {string} originalProfileName
  * @param {Object} accountData
- * @param {string} [awsDir]
+ * @param {string} [vaultDir]
+ * @param {string} [pinOverride]
  * @returns {Array} Updated list of AWS account profiles
  */
-export const updateAwsProfile = (originalProfileName, accountData, awsDir) => {
+export const updateAwsProfile = (originalProfileName, accountData, vaultDir, pinOverride) => {
   const newProfileName = validateProfileName(accountData.profile);
   const accessKeyId = (accountData.accessKeyId || '').trim();
   const secretAccessKey = (accountData.secretAccessKey || '').trim();
@@ -358,60 +552,84 @@ export const updateAwsProfile = (originalProfileName, accountData, awsDir) => {
     throw new Error('Access Key ID is required.');
   }
 
-  const paths = getAwsPaths(awsDir);
-  const credDoc = readIniFile(paths.credentialsPath, false);
-  const existingSection = credDoc.sections.find((s) => s.key === originalProfileName);
+  const paths = getVaultPaths(vaultDir);
+  if (!existsSync(paths.vaultFile)) {
+    throw new Error(`Profile "${originalProfileName}" not found.`);
+  }
 
-  if (!existingSection) {
+  const rawPin = pinOverride || accountData.pin || sessionPin;
+  if (!rawPin) {
+    throw new Error('Auth vault is locked. Enter your 6-digit PIN to unlock.');
+  }
+  const activePin = validatePin(rawPin);
+  const existingVault = readVaultFile(paths.vaultFile);
+  const { stored, saltBuffer } = decryptProfilesFromVault(existingVault, activePin);
+
+  const existingIdx = stored.findIndex((p) => p.profile === originalProfileName);
+  if (existingIdx < 0) {
     throw new Error(`Profile "${originalProfileName}" not found.`);
   }
 
   if (
     newProfileName !== originalProfileName &&
-    credDoc.sections.some((s) => s.key === newProfileName)
+    stored.some((p) => p.profile === newProfileName)
   ) {
     throw new Error(`Profile "${newProfileName}" already exists.`);
   }
 
-  const credUpdates = {
-    aws_access_key_id: accessKeyId,
-    aws_session_token: sessionToken || null,
+  stored[existingIdx] = {
+    profile: newProfileName,
+    region,
+    accessKeyId,
+    secretAccessKey: secretAccessKey || stored[existingIdx].secretAccessKey,
+    sessionToken,
   };
-  // Only overwrite secret access key if the user provided a new one
-  if (secretAccessKey) {
-    credUpdates.aws_secret_access_key = secretAccessKey;
-  }
 
-  upsertSection(credDoc, originalProfileName, newProfileName, credUpdates, false);
-  writeIniFile(paths.awsDir, paths.credentialsPath, credDoc);
+  const updatedVault = encryptProfilesToVault(stored, activePin, saltBuffer);
+  writeVaultFile(paths, updatedVault);
+  sessionPin = activePin;
+  const profiles = toAwsProfiles(stored);
+  sessionCache = { pin: activePin, vaultMac: updatedVault.mac, profiles };
 
-  const configDoc = readIniFile(paths.configPath, true);
-  upsertSection(configDoc, originalProfileName, newProfileName, { region }, true);
-  writeIniFile(paths.awsDir, paths.configPath, configDoc);
-
-  return getAwsProfiles(awsDir);
+  return profiles;
 };
 
 /**
- * Remove an AWS account profile from ~/.aws/credentials and ~/.aws/config
+ * Remove an AWS account profile from the PIN-encrypted auth vault
  * @param {string} profileName
- * @param {string} [awsDir]
+ * @param {string} [vaultDir]
+ * @param {string} [pinOverride]
  * @returns {Array} Updated list of AWS account profiles
  */
-export const removeAwsProfile = (profileName, awsDir) => {
-  const paths = getAwsPaths(awsDir);
-
-  if (existsSync(paths.credentialsPath)) {
-    const credDoc = readIniFile(paths.credentialsPath, false);
-    removeSection(credDoc, profileName);
-    writeIniFile(paths.awsDir, paths.credentialsPath, credDoc);
+export const removeAwsProfile = (profileName, vaultDir, pinOverride) => {
+  const paths = getVaultPaths(vaultDir);
+  if (!existsSync(paths.vaultFile)) {
+    return [];
   }
 
-  if (existsSync(paths.configPath)) {
-    const configDoc = readIniFile(paths.configPath, true);
-    removeSection(configDoc, profileName);
-    writeIniFile(paths.awsDir, paths.configPath, configDoc);
+  const rawPin = pinOverride || sessionPin;
+  if (!rawPin) {
+    throw new Error('Auth vault is locked. Enter your 6-digit PIN to unlock.');
+  }
+  const activePin = validatePin(rawPin);
+  const existingVault = readVaultFile(paths.vaultFile);
+  const { stored, saltBuffer } = decryptProfilesFromVault(existingVault, activePin);
+
+  const remaining = stored.filter((p) => p.profile !== profileName);
+  if (remaining.length === 0) {
+    try {
+      unlinkSync(paths.vaultFile);
+    } catch {
+      // ignore unlink error
+    }
+    sessionPin = null;
+    sessionCache = null;
+    return [];
   }
 
-  return getAwsProfiles(awsDir);
+  const updatedVault = encryptProfilesToVault(remaining, activePin, saltBuffer);
+  writeVaultFile(paths, updatedVault);
+  const profiles = toAwsProfiles(remaining);
+  sessionCache = { pin: activePin, vaultMac: updatedVault.mac, profiles };
+  return profiles;
 };

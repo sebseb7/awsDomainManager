@@ -20,10 +20,21 @@ import {
   upsertSesMxRecord,
 } from './route53Service.js';
 
+const buildAccountCredentials = (account) => {
+  if (account?.accessKeyId && account?.secretAccessKey) {
+    return {
+      accessKeyId: account.accessKeyId,
+      secretAccessKey: account.secretAccessKey,
+      ...(account.sessionToken ? { sessionToken: account.sessionToken } : {}),
+    };
+  }
+  return fromIni({ profile: account?.profile });
+};
+
 const createSesClient = (account) => {
   return new SESv2Client({
     region: account.region || 'us-east-1',
-    credentials: fromIni({ profile: account.profile }),
+    credentials: buildAccountCredentials(account),
   });
 };
 

@@ -26,10 +26,21 @@ import { fromIni } from '@aws-sdk/credential-provider-ini';
  * @param {Object} account - The AWS account object
  * @returns {EC2Client} EC2 client instance
  */
+const buildAccountCredentials = (account) => {
+  if (account?.accessKeyId && account?.secretAccessKey) {
+    return {
+      accessKeyId: account.accessKeyId,
+      secretAccessKey: account.secretAccessKey,
+      ...(account.sessionToken ? { sessionToken: account.sessionToken } : {}),
+    };
+  }
+  return fromIni({ profile: account?.profile });
+};
+
 const createEC2Client = (account) => {
   return new EC2Client({
     region: account.region,
-    credentials: fromIni({ profile: account.profile }),
+    credentials: buildAccountCredentials(account),
   });
 };
 

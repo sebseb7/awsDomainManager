@@ -56,7 +56,7 @@ export const Route53View: React.FC<Props> = ({ account, onError, onSuccess }) =>
     setRecords([]);
     setSearch('');
     loadZones();
-  }, [account.profile]);
+  }, [account.profile, account.region]);
 
   const handleOpenZone = (zone: HostedZone) => {
     setSelectedZone(zone);

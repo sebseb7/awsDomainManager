@@ -2,6 +2,10 @@ import React, { useState, useEffect } from 'react';
 import { render, useApp } from 'ink';
 import App from './components/App.jsx';
 import {
+  getAuthStatus,
+  unlockWithPin,
+  validatePin,
+  validateProfileName,
   getAwsProfiles,
   addAwsProfile,
   updateAwsProfile,
@@ -73,8 +77,13 @@ const EMPTY_ACCOUNT_FORM = {
 };
 
 const CLI = () => {
-  // Navigation state: 'resource', 'account', 'zone', 'records', 'sg', 'rules', 'manage-accounts'
-  const [screen, setScreen] = useState('resource');
+  const [authStatus, setAuthStatus] = useState(() => getAuthStatus());
+  // Navigation state: 'pin-unlock', 'resource', 'account', 'zone', 'records', 'sg', 'rules', 'manage-accounts'
+  const [screen, setScreen] = useState(() => {
+    const initial = getAuthStatus();
+    return initial.hasPin && !initial.unlocked ? 'pin-unlock' : 'resource';
+  });
+  const [pinUnlockInput, setPinUnlockInput] = useState('');
   const [selectedResource, setSelectedResource] = useState(null);
   const [accounts, setAccounts] = useState(() => getAwsProfiles());
   const [selectedAccount, setSelectedAccount] = useState(null);
@@ -84,6 +93,9 @@ const CLI = () => {
   const [accountFormMode, setAccountFormMode] = useState(null); // null | 'add' | 'edit'
   const [editingProfile, setEditingProfile] = useState(null);
   const [accountFormData, setAccountFormData] = useState(EMPTY_ACCOUNT_FORM);
+  const [showPinSetupModal, setShowPinSetupModal] = useState(false);
+  const [pinSetupInput, setPinSetupInput] = useState('');
+  const [pinSetupConfirmInput, setPinSetupConfirmInput] = useState('');
   const [statusMessage, setStatusMessage] = useState(null);
   
   // Route53 state
@@ -749,22 +761,96 @@ const CLI = () => {
   const cancelAccountForm = () => {
     setAccountFormMode(null);
     setEditingProfile(null);
+    setShowPinSetupModal(false);
+    setPinSetupInput('');
+    setPinSetupConfirmInput('');
     setError(null);
+  };
+
+  const submitPinUnlock = (directVal) => {
+    setError(null);
+    try {
+      const candidate = typeof directVal === 'string' && directVal ? directVal : pinUnlockInput;
+      const unlockedAccounts = unlockWithPin(candidate);
+      setAccounts(unlockedAccounts);
+      setAuthStatus(getAuthStatus());
+      setPinUnlockInput('');
+      setScreen('resource');
+    } catch (err) {
+      setError(err.message);
+      setPinUnlockInput('');
+    }
+  };
+
+  const cancelPinSetup = () => {
+    setShowPinSetupModal(false);
+    setPinSetupInput('');
+    setPinSetupConfirmInput('');
+    setError(null);
+  };
+
+  const submitPinSetup = () => {
+    setError(null);
+    try {
+      const cleanPin = validatePin(pinSetupInput);
+      if (cleanPin !== (pinSetupConfirmInput || '').trim()) {
+        throw new Error('6-digit PIN and confirmation PIN do not match.');
+      }
+      const targetProfile = accountFormData.profile.trim();
+      const updatedAccounts = addAwsProfile({
+        ...accountFormData,
+        pin: cleanPin,
+      });
+      setAccounts(updatedAccounts);
+      setAuthStatus(getAuthStatus());
+      const newIndex = updatedAccounts.findIndex((a) => a.profile === targetProfile);
+      if (newIndex >= 0) {
+        setSelectedAccountIndex(newIndex);
+      }
+      setShowPinSetupModal(false);
+      setPinSetupInput('');
+      setPinSetupConfirmInput('');
+      setAccountFormMode(null);
+      setEditingProfile(null);
+      setStatusMessage(
+        `Created 6-digit PIN (salted hash) and encrypted account "${targetProfile}".`
+      );
+    } catch (err) {
+      setError(err.message);
+    }
   };
 
   const saveAccount = () => {
     setError(null);
     try {
-      const targetProfile = accountFormData.profile.trim();
+      const targetProfile = validateProfileName(accountFormData.profile);
+      const accessKeyId = (accountFormData.accessKeyId || '').trim();
+      const secretAccessKey = (accountFormData.secretAccessKey || '').trim();
+      if (!accessKeyId) {
+        throw new Error('Access Key ID is required.');
+      }
+      if (accountFormMode === 'add' && !secretAccessKey) {
+        throw new Error('Secret Access Key is required.');
+      }
+
+      const currentAuth = getAuthStatus();
+      if (accountFormMode === 'add' && !currentAuth.hasPin && accounts.length === 0) {
+        setPinSetupInput('');
+        setPinSetupConfirmInput('');
+        setShowPinSetupModal(true);
+        return;
+      }
+
       let updatedAccounts;
       if (accountFormMode === 'edit') {
         updatedAccounts = updateAwsProfile(editingProfile, accountFormData);
-        setStatusMessage(`Account "${targetProfile}" updated.`);
+        setStatusMessage(`Account "${targetProfile}" updated in PIN-encrypted auth vault.`);
       } else {
         updatedAccounts = addAwsProfile(accountFormData);
-        setStatusMessage(`Account "${targetProfile}" added.`);
+        setStatusMessage(`Account "${targetProfile}" added to PIN-encrypted auth vault.`);
       }
       setAccounts(updatedAccounts);
+      setAuthStatus(getAuthStatus());
       const newIndex = updatedAccounts.findIndex((a) => a.profile === targetProfile);
       if (newIndex >= 0) {
         setSelectedAccountIndex(newIndex);
@@ -783,6 +869,7 @@ const CLI = () => {
     try {
       const updatedAccounts = removeAwsProfile(accountToRemove.profile);
       setAccounts(updatedAccounts);
+      setAuthStatus(getAuthStatus());
       setShowDeleteConfirm(false);
       setSelectedAccountIndex((prev) =>
         updatedAccounts.length === 0 ? 0 : Math.min(prev, updatedAccounts.length - 1)
@@ -1726,6 +1813,8 @@ const CLI = () => {
       } else if (showAddSesIdentity) {
         setShowAddSesIdentity(false);
         setError(null);
+      } else if (showPinSetupModal) {
+        cancelPinSetup();
       } else if (accountFormMode) {
         cancelAccountForm();
       } else if (objectFormMode) {
@@ -1819,7 +1908,7 @@ const CLI = () => {
         setSelectedResource(null);
         setStatusMessage(null);
         setError(null);
-      } else if (screen === 'resource') {
+      } else if (screen === 'resource' || screen === 'pin-unlock') {
         exit();
       }
     },
@@ -1829,6 +1918,8 @@ const CLI = () => {
   const navigationState = {
     screen,
     showAddRecord:
+      screen === 'pin-unlock' ||
+      showPinSetupModal ||
       showAddRecord ||
       showAddRule ||
       showAddBucket ||
@@ -1893,12 +1984,23 @@ const CLI = () => {
       selectedRuleIndex={selectedRuleIndex}
       deleteRule={deleteRule}
       selectedAccountIndex={selectedAccountIndex}
+      authStatus={authStatus}
+      pinUnlockInput={pinUnlockInput}
+      setPinUnlockInput={setPinUnlockInput}
+      submitPinUnlock={submitPinUnlock}
       accountFormMode={accountFormMode}
       editingProfile={editingProfile}
       accountFormData={accountFormData}
       setAccountFormData={setAccountFormData}
       saveAccount={saveAccount}
       cancelAccountForm={cancelAccountForm}
+      showPinSetupModal={showPinSetupModal}
+      pinSetupInput={pinSetupInput}
+      setPinSetupInput={setPinSetupInput}
+      pinSetupConfirmInput={pinSetupConfirmInput}
+      setPinSetupConfirmInput={setPinSetupConfirmInput}
+      submitPinSetup={submitPinSetup}
+      cancelPinSetup={cancelPinSetup}
       statusMessage={statusMessage}
       buckets={buckets}
       selectedBucket={selectedBucket}

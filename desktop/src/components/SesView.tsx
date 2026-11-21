@@ -72,7 +72,7 @@ export const SesView: React.FC<Props> = ({ account, onError, onSuccess }) => {
     setSearch('');
     setTypeFilter('ALL');
     loadIdentities();
-  }, [account.profile]);
+  }, [account.profile, account.region]);
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();

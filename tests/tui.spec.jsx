@@ -1,7 +1,19 @@
-import { mkdirSync } from 'fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync } from 'fs';
+import { tmpdir } from 'os';
+import { join } from 'path';
 import React from 'react';
 import { test, expect } from '@playwright/test';
 import App from '../src/components/App.jsx';
+import {
+  addAwsProfile,
+  getAuthStatus,
+  getAwsProfiles,
+  lockAuthSession,
+  removeAwsProfile,
+  unlockWithPin,
+  updateAwsProfile,
+  validatePin,
+} from '../src/utils/profiles.js';
 import {
   renderInkToAnsi,
   screenshotAnsiTerminal,
@@ -340,4 +352,125 @@ test('TUI: Amazon SES SMTP Sender Keys (AmazonSesSendingAccess) screen', async (
   expect(qrPlain).toContain('backupemailreceiver');
   expect(qrPlain).toContain('reconciliationemailreceiver');
   expect(qrPlain).toContain('█');
+});
+
+test('TUI & Vault: 6-digit PIN encryption, salted PIN hash verification, and PIN prompt screens', async () => {
+  const tempVaultDir = mkdtempSync(join(tmpdir(), 'aws-dm-pin-test-'));
+  try {
+    lockAuthSession(tempVaultDir);
+    const initialStatus = getAuthStatus(tempVaultDir);
+    expect(initialStatus.hasPin).toBe(false);
+    expect(initialStatus.unlocked).toBe(true);
+
+    expect(() => validatePin('12345')).toThrow('PIN must be exactly 6 digits');
+    expect(() => validatePin('12345a')).toThrow('PIN must be exactly 6 digits');
+    expect(validatePin('482910')).toBe('482910');
+
+    // First account creation requires a 6-digit PIN
+    expect(() =>
+      addAwsProfile(
+        {
+          profile: 'prod-aws',
+          region: 'eu-central-1',
+          accessKeyId: 'AKIAIOSFODNN7EXAMPLE',
+          secretAccessKey: 'wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY',
+        },
+        tempVaultDir
+      )
+    ).toThrow('6-digit PIN is required');
+
+    // Create first account with 6-digit PIN
+    const profiles = addAwsProfile(
+      {
+        profile: 'prod-aws',
+        region: 'eu-central-1',
+        accessKeyId: 'AKIAIOSFODNN7EXAMPLE',
+        secretAccessKey: 'wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY',
+        pin: '482910',
+      },
+      tempVaultDir
+    );
+    expect(profiles).toHaveLength(1);
+    expect(profiles[0].profile).toBe('prod-aws');
+
+    // Verify encrypted vault on disk has salt & pinHash and zero plaintext credentials
+    const rawVaultJson = readFileSync(join(tempVaultDir, 'auth.enc.json'), 'utf8');
+    const parsedVault = JSON.parse(rawVaultJson);
+    expect(parsedVault.kdf).toBe('pbkdf2-hmac-sha256');
+    expect(parsedVault.salt).toBeTruthy();
+    expect(parsedVault.pinHash).toBeTruthy();
+    expect(parsedVault.ciphertext).toBeTruthy();
+    expect(rawVaultJson).not.toContain('AKIAIOSFODNN7EXAMPLE');
+    expect(rawVaultJson).not.toContain('wJalrXUtnFEMI');
+    expect(rawVaultJson).not.toContain('482910');
+
+    // Simulate app relaunch -> vault is locked and asks for PIN
+    const relaunchStatus = lockAuthSession(tempVaultDir);
+    expect(relaunchStatus.hasPin).toBe(true);
+    expect(relaunchStatus.unlocked).toBe(false);
+    expect(getAwsProfiles(tempVaultDir)).toHaveLength(0);
+
+    // Wrong PIN fails salted PIN hash verification
+    expect(() => unlockWithPin('000000', tempVaultDir)).toThrow(
+      'Incorrect 6-digit PIN. Salted PIN hash verification failed.'
+    );
+
+    // Correct PIN passes salted PIN hash check and decrypts profiles
+    const unlocked = unlockWithPin('482910', tempVaultDir);
+    expect(unlocked).toHaveLength(1);
+    expect(unlocked[0].accessKeyId).toBe('AKIAIOSFODNN7EXAMPLE');
+
+    // Update and remove profile in encrypted vault
+    const updated = updateAwsProfile(
+      'prod-aws',
+      {
+        profile: 'prod-aws',
+        region: 'us-west-2',
+        accessKeyId: 'AKIAROTATED000000001',
+      },
+      tempVaultDir
+    );
+    expect(updated[0].region).toBe('us-west-2');
+    expect(updated[0].accessKeyId).toBe('AKIAROTATED000000001');
+
+    const afterRemove = removeAwsProfile('prod-aws', tempVaultDir);
+    expect(afterRemove).toHaveLength(0);
+    expect(getAuthStatus(tempVaultDir).hasPin).toBe(false);
+  } finally {
+    rmSync(tempVaultDir, { recursive: true, force: true });
+  }
+
+  // Verify TUI launch PIN unlock screen and first-account PIN setup screen render cleanly
+  const unlockAnsi = await renderInkToAnsi(
+    <App
+      {...BASE_TUI_PROPS}
+      screen="pin-unlock"
+      authStatus={{
+        hasPin: true,
+        unlocked: false,
+        vaultPath: '~/.aws-domain-manager/auth.enc.json',
+        saltPreview: 'a9f3c18b...',
+        pinHashPreview: '7e4d20b8f12c...',
+      }}
+      pinUnlockInput="482"
+    />,
+    { columns: 100, rows: 16 }
+  );
+  const unlockPlain = stripAnsi(unlockAnsi);
+  expect(unlockPlain).toContain('Unlock PIN-Encrypted Auth Vault');
+  expect(unlockPlain).toContain('7e4d20b8f12c...');
+
+  const setupAnsi = await renderInkToAnsi(
+    <App
+      {...BASE_TUI_PROPS}
+      screen="manage-accounts"
+      accounts={[]}
+      showPinSetupModal={true}
+      pinSetupInput="482910"
+      pinSetupConfirmInput="482910"
+    />,
+    { columns: 100, rows: 18 }
+  );
+  const setupPlain = stripAnsi(setupAnsi);
+  expect(setupPlain).toContain('Set 6-Digit Encryption PIN (First Account Setup)');
 });

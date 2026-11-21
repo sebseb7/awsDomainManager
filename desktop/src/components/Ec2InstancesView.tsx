@@ -71,7 +71,7 @@ export const Ec2InstancesView: React.FC<Props> = ({ account, onError, onSuccess 
     setPtrTarget(null);
     setPtrInput('');
     loadAll();
-  }, [account.profile]);
+  }, [account.profile, account.region]);
 
   const handleToggleRebootLock = async (inst: Ec2Instance) => {
     setLoading(true);

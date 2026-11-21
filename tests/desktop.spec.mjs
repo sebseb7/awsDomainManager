@@ -35,18 +35,85 @@ test.beforeEach(async ({ page }) => {
       sesIdentities,
       sesSenderKeys,
     }) => {
+      let currentProfiles = structuredClone(profiles);
       let currentUsers = structuredClone(iamUsers);
       let currentSes = structuredClone(sesIdentities);
       let currentSesKeys = structuredClone(sesSenderKeys);
       let currentInstances = structuredClone(ec2Instances);
       let currentEips = structuredClone(elasticIps);
+      let vaultPin = '482910';
+      let hasPin = true;
+      let unlocked = false;
 
       window.__TAURI_INTERNALS__ = {
         transformCallback: () => 0,
         invoke: async (cmd, args = {}) => {
           switch (cmd) {
+            case 'get_auth_status':
+              return {
+                hasPin,
+                unlocked: !hasPin || unlocked,
+                vaultPath: '~/.aws-domain-manager/auth.enc.json',
+                saltPreview: hasPin ? 'a9f3c18b...' : null,
+                pinHashPreview: hasPin ? '7e4d20b8f12c...' : null,
+              };
+            case 'unlock_with_pin': {
+              const pin = String(args.pin || '').trim();
+              if (!/^\d{6}$/.test(pin)) {
+                throw 'PIN must be exactly 6 digits (0-9).';
+              }
+              if (hasPin && pin !== vaultPin) {
+                throw 'Incorrect 6-digit PIN. Salted PIN hash verification failed.';
+              }
+              unlocked = true;
+              return currentProfiles;
+            }
+            case 'lock_auth_session': {
+              unlocked = false;
+              return {
+                hasPin,
+                unlocked: false,
+                vaultPath: '~/.aws-domain-manager/auth.enc.json',
+                saltPreview: hasPin ? 'a9f3c18b...' : null,
+                pinHashPreview: hasPin ? '7e4d20b8f12c...' : null,
+              };
+            }
             case 'list_profiles':
-              return profiles;
+              if (hasPin && !unlocked) {
+                throw 'Auth vault is locked. Enter your 6-digit PIN to unlock.';
+              }
+              return currentProfiles;
+            case 'add_profile': {
+              const inp = args.input || {};
+              if (!hasPin) {
+                const pin = String(inp.pin || '').trim();
+                if (!/^\d{6}$/.test(pin)) {
+                  throw 'A 6-digit PIN is required when creating the first account to encrypt auth data.';
+                }
+                vaultPin = pin;
+                hasPin = true;
+                unlocked = true;
+              }
+              const created = {
+                id: `account-${currentProfiles.length + 1}`,
+                name: inp.profile,
+                profile: inp.profile,
+                region: inp.region || 'us-east-1',
+                accessKeyId: inp.accessKeyId,
+                secretAccessKey: inp.secretAccessKey,
+                sessionToken: inp.sessionToken || '',
+              };
+              currentProfiles.push(created);
+              return currentProfiles;
+            }
+            case 'remove_profile': {
+              currentProfiles = currentProfiles.filter((p) => p.profile !== args.profileName);
+              if (currentProfiles.length === 0) {
+                hasPin = false;
+                unlocked = true;
+              }
+              return currentProfiles;
+            }
             case 'list_hosted_zones':
               return zones;
             case 'list_dns_records':
@@ -365,6 +432,20 @@ test('Desktop App: Route53, EC2, S3 IAM Keys (multiple read / single write), QR 
 }) => {
   await page.goto('/');
 
+  // 0. App launch asks for 6-digit PIN -> verify wrong PIN rejected by salted hash, then unlock
+  await expect(page.getByText('Unlock PIN-Encrypted Auth Vault')).toBeVisible();
+  await expect(page.getByText('7e4d20b8f12c...')).toBeVisible();
+  const pinInput = page.getByLabel('6-Digit Security PIN');
+  await pinInput.fill('000000');
+  await page.getByRole('button', { name: /Unlock Vault/i }).click();
+  await expect(
+    page.getByText('Incorrect 6-digit PIN. Salted PIN hash verification failed.')
+  ).toBeVisible();
+
+  await pinInput.fill('482910');
+  await page.getByRole('button', { name: /Unlock Vault/i }).click();
+  await expect(page.getByText('PIN Unlocked')).toBeVisible();
+
   // 1. Route53 Hosted Zones -> click into example.com.
   await expect(page.getByText('example.com.')).toBeVisible();
   await page.getByText('example.com.').click();
@@ -519,4 +600,24 @@ test('Desktop App: Route53, EC2, S3 IAM Keys (multiple read / single write), QR 
   expect(policyText.length).toBeLessThanOrEqual(2048);
   expect(policyText.replace(/\s+/g, '').length).toBeLessThanOrEqual(2048);
   await page.screenshot({ path: 'docs/desktop-accounts.png' });
+
+  // 7. Test removing all accounts and creating the first account -> prompts for 6-digit encryption PIN
+  for (const profName of ['prod-aws', 'staging-aws']) {
+    const row = page.locator('tr', { hasText: profName });
+    await row.locator('button.btn-danger').click();
+    await page.getByRole('button', { name: 'Remove', exact: true }).click();
+  }
+  await expect(page.getByText('No AWS profiles configured')).toBeVisible();
+  await page.getByRole('button', { name: /Add AWS Account/i }).click();
+  await page.getByPlaceholder('default, prod, dev').fill('first-encrypted-aws');
+  await page.getByPlaceholder('AKIA...').fill('AKIAFIRSTACCOUNT0001');
+  await page.getByPlaceholder('Required').fill('firstAccountSecretKey00000000000000000001');
+  await page.getByRole('button', { name: /Next: Set 6-Digit PIN/i }).click();
+  await expect(page.getByText('Set 6-Digit Encryption PIN')).toBeVisible();
+  await page.getByLabel('Create 6-Digit PIN').fill('654321');
+  await page.getByLabel('Confirm 6-Digit PIN').fill('654321');
+  await page.getByRole('button', { name: /Encrypt & Save Account/i }).click();
+  await expect(
+    page.getByText('Created 6-digit PIN (salted hash) and encrypted profile "first-encrypted-aws".')
+  ).toBeVisible();
 });

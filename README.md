@@ -3,9 +3,9 @@
 [![CI Build](https://github.com/sebseb7/awsDomainManager/actions/workflows/ci.yml/badge.svg)](https://github.com/sebseb7/awsDomainManager/actions/workflows/ci.yml)
 [![Release Desktop App](https://github.com/sebseb7/awsDomainManager/actions/workflows/release.yml/badge.svg)](https://github.com/sebseb7/awsDomainManager/actions/workflows/release.yml)
 
-**Download Desktop App (v2.4.1):**
-- **macOS (Apple Silicon `.dmg`):** [AWS Domain Manager_2.4.1_aarch64.dmg](https://github.com/sebseb7/awsDomainManager/releases/download/v2.4.1/AWS.Domain.Manager_2.4.1_aarch64.dmg)
-- **Windows (x64 `.exe`):** [AWS Domain Manager_2.4.1_x64-setup.exe](https://github.com/sebseb7/awsDomainManager/releases/download/v2.4.1/AWS.Domain.Manager_2.4.1_x64-setup.exe)
+**Download Desktop App (v2.5.0):**
+- **macOS (Apple Silicon `.dmg`):** [AWS Domain Manager_2.5.0_aarch64.dmg](https://github.com/sebseb7/awsDomainManager/releases/download/v2.5.0/AWS.Domain.Manager_2.5.0_aarch64.dmg)
+- **Windows (x64 `.exe`):** [AWS Domain Manager_2.5.0_x64-setup.exe](https://github.com/sebseb7/awsDomainManager/releases/download/v2.5.0/AWS.Domain.Manager_2.5.0_x64-setup.exe)
 
 A terminal-based and native desktop UI tool for managing AWS Route53, EC2 Instances & Elastic IPs (with Reboot Lock protection), EC2 Security Groups, S3 Buckets (with scoped IAM key management), Amazon SES Identities (domains & email addresses), and AWS credential profiles across multiple accounts.
 
@@ -75,7 +75,9 @@ npm i . && npm run build && npm run start
   - Offers optional region-aware SES inbound `MX` (`10 inbound-smtp.<region>.amazonaws.com`) publishing for domains (with overwrite warning if an existing MX record is present)
   - Highlights unverified email identities with an **Action required** inbox verification banner and one-click **Resend** verification email action
   - Manages multiple per-email **SMTP Sender Keys** (`AmazonSesSendingAccess` IAM users under `/ses-smtp-users/`, scoped to `ses:FromAddress`) with SigV4-derived SMTP passwords, rotation, revocation, and an integrated **SMTP Send Tester** (`lettre` in Desktop, `nodemailer` in TUI)
-- **AWS Account Management** — Add, edit, and remove AWS credential profiles (`~/.aws/credentials` and `~/.aws/config`) directly from the tool, with an interactive **Minimum IAM Permissions** policy generator
+- **AWS Account Management & 6-Digit PIN-Encrypted Auth Vault** — Add, edit, and remove AWS credential profiles directly from the tool, with an interactive **Minimum IAM Permissions** policy generator:
+  - **PIN-Only Encrypted Storage**: Auth data is stored exclusively encrypted in `~/.aws-domain-manager/auth.enc.json` (never in plaintext on disk)
+  - **Salted PIN Hash Verification**: When the first account is created, the app prompts for a **6-digit PIN**, generates a random 16-byte cryptographic salt, stores a salted PBKDF2-HMAC-SHA256 verification hash (`pinHash`) to immediately verify whether an entered PIN is correct, and asks for that 6-digit PIN on every launch of the app
 - Terminal UI with keyboard navigation and native Desktop App (Tauri v2)
 
 ## Navigation
@@ -140,8 +142,7 @@ Resource Selection
 ## Requirements
 
 - Node.js 18+
-- AWS credentials configured in `~/.aws/credentials` (or add them via **Manage AWS Accounts**)
-- AWS region configured in `~/.aws/config` (EC2, S3, and SES are region-specific)
+- AWS credentials added via **Manage AWS Accounts** (encrypted with a 6-digit PIN and salted PIN hash in `~/.aws-domain-manager/auth.enc.json`)
 
 ## Minimum IAM Permissions (Least Privilege)
 

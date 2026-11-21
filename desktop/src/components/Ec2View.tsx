@@ -53,7 +53,7 @@ export const Ec2View: React.FC<Props> = ({ account, onError, onSuccess }) => {
     setRules([]);
     setSearch('');
     loadGroups();
-  }, [account.profile]);
+  }, [account.profile, account.region]);
 
   const handleOpenGroup = (group: SecurityGroup) => {
     setSelectedGroup(group);

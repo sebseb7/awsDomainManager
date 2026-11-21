@@ -9,29 +9,44 @@ mod ses_smtp;
 
 use ec2::{AddRuleInput, Ec2InstanceDto, ElasticIpDto, InboundRuleDto, SecurityGroupDto};
 use iam::{BucketIamUserDto, CreatedIamUserDto};
-use profiles::{AccountInput, AwsProfile};
+use profiles::{AccountInput, AuthStatus, AwsProfile};
 use route53::{DnsRecordDto, HostedZoneDto, RecordInput};
 use s3::{BucketDto, S3ObjectDto};
 use ses::SesIdentityDto;
 use ses_smtp::{CreatedSesSenderKeyDto, SesSenderKeyUserDto, SmtpTestSendInput};
 
 #[tauri::command]
-fn list_profiles() -> Result<Vec<AwsProfile>, String> {
+async fn get_auth_status() -> Result<AuthStatus, String> {
+    profiles::get_auth_status()
+}
+
+#[tauri::command]
+async fn unlock_with_pin(pin: String) -> Result<Vec<AwsProfile>, String> {
+    profiles::unlock_with_pin(&pin)
+}
+
+#[tauri::command]
+async fn lock_auth_session() -> Result<AuthStatus, String> {
+    profiles::lock_auth_session()
+}
+
+#[tauri::command]
+async fn list_profiles() -> Result<Vec<AwsProfile>, String> {
     profiles::get_aws_profiles()
 }
 
 #[tauri::command]
-fn add_profile(input: AccountInput) -> Result<Vec<AwsProfile>, String> {
+async fn add_profile(input: AccountInput) -> Result<Vec<AwsProfile>, String> {
     profiles::add_aws_profile(input)
 }
 
 #[tauri::command]
-fn update_profile(original_profile: String, input: AccountInput) -> Result<Vec<AwsProfile>, String> {
+async fn update_profile(original_profile: String, input: AccountInput) -> Result<Vec<AwsProfile>, String> {
     profiles::update_aws_profile(&original_profile, input)
 }
 
 #[tauri::command]
-fn remove_profile(profile_name: String) -> Result<Vec<AwsProfile>, String> {
+async fn remove_profile(profile_name: String) -> Result<Vec<AwsProfile>, String> {
     profiles::remove_aws_profile(&profile_name)
 }
 
@@ -364,6 +379,9 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
+            get_auth_status,
+            unlock_with_pin,
+            lock_auth_session,
             list_profiles,
             add_profile,
             update_profile,

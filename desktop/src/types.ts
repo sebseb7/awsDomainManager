@@ -14,6 +14,15 @@ export interface AccountInput {
   accessKeyId: string;
   secretAccessKey: string;
   sessionToken: string;
+  pin?: string;
+}
+
+export interface AuthStatus {
+  hasPin: boolean;
+  unlocked: boolean;
+  vaultPath: string;
+  saltPreview?: string | null;
+  pinHashPreview?: string | null;
 }
 
 export interface HostedZone {

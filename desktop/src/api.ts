@@ -3,6 +3,7 @@ import { open, save } from '@tauri-apps/plugin-dialog';
 import type {
   AccountInput,
   AddRuleInput,
+  AuthStatus,
   AwsProfile,
   BucketIamUser,
   CreatedIamUser,
@@ -21,7 +22,10 @@ import type {
 } from './types';
 
 export const api = {
-  // Profiles
+  // PIN-Encrypted Auth Vault & Profiles
+  getAuthStatus: () => invoke<AuthStatus>('get_auth_status'),
+  unlockWithPin: (pin: string) => invoke<AwsProfile[]>('unlock_with_pin', { pin }),
+  lockAuthSession: () => invoke<AuthStatus>('lock_auth_session'),
   listProfiles: () => invoke<AwsProfile[]>('list_profiles'),
   addProfile: (input: AccountInput) => invoke<AwsProfile[]>('add_profile', { input }),
   updateProfile: (originalProfile: string, input: AccountInput) =>

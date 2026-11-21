@@ -6,10 +6,21 @@ import { fromIni } from '@aws-sdk/credential-provider-ini';
  * @param {Object} account - The AWS account object
  * @returns {Route53Client} Route53 client instance
  */
+const buildAccountCredentials = (account) => {
+  if (account?.accessKeyId && account?.secretAccessKey) {
+    return {
+      accessKeyId: account.accessKeyId,
+      secretAccessKey: account.secretAccessKey,
+      ...(account.sessionToken ? { sessionToken: account.sessionToken } : {}),
+    };
+  }
+  return fromIni({ profile: account?.profile });
+};
+
 const createRoute53Client = (account) => {
   return new Route53Client({
     region: account.region,
-    credentials: fromIni({ profile: account.profile }),
+    credentials: buildAccountCredentials(account),
   });
 };
 
