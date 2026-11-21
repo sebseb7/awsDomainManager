@@ -6,10 +6,15 @@ import ZoneScreen from './screens/ZoneScreen.jsx';
 import RecordsScreen from './screens/RecordsScreen.jsx';
 import SecurityGroupScreen from './screens/SecurityGroupScreen.jsx';
 import RulesScreen from './screens/RulesScreen.jsx';
+import ManageAccountsScreen from './screens/ManageAccountsScreen.jsx';
+import BucketScreen from './screens/BucketScreen.jsx';
+import BucketObjectsScreen from './screens/BucketObjectsScreen.jsx';
 
 const getTitle = (selectedResource) => {
   if (!selectedResource) return 'AWS Domain Manager';
   if (selectedResource.id === 'ec2') return 'EC2 Security Group Inbound Rules Manager';
+  if (selectedResource.id === 's3') return 'S3 Bucket Manager';
+  if (selectedResource.id === 'accounts') return 'AWS Account Manager';
   return 'Route53 DNS Record Manager';
 };
 
@@ -48,6 +53,32 @@ const App = (props) => {
     addRule,
     selectedRuleIndex,
     deleteRule,
+    selectedAccountIndex,
+    accountFormMode,
+    editingProfile,
+    accountFormData,
+    setAccountFormData,
+    saveAccount,
+    cancelAccountForm,
+    statusMessage,
+    buckets,
+    selectedBucket,
+    selectedBucketIndex,
+    showAddBucket,
+    setShowAddBucket,
+    bucketFormData,
+    setBucketFormData,
+    addBucket,
+    createdIamResult,
+    dismissCreatedIamResult,
+    bucketPrefix,
+    objects,
+    selectedObjectIndex,
+    objectFormMode,
+    objectFormData,
+    setObjectFormData,
+    submitObjectForm,
+    cancelObjectForm,
   } = props;
 
   const renderScreen = () => {
@@ -131,6 +162,60 @@ const App = (props) => {
             showDeleteConfirm={showDeleteConfirm}
             setShowDeleteConfirm={setShowDeleteConfirm}
             deleteRule={deleteRule}
+          />
+        );
+
+      case 'manage-accounts':
+        return (
+          <ManageAccountsScreen
+            accounts={accounts}
+            selectedAccountIndex={selectedAccountIndex}
+            accountFormMode={accountFormMode}
+            editingProfile={editingProfile}
+            accountFormData={accountFormData}
+            setAccountFormData={setAccountFormData}
+            saveAccount={saveAccount}
+            cancelAccountForm={cancelAccountForm}
+            showDeleteConfirm={showDeleteConfirm}
+            statusMessage={statusMessage}
+          />
+        );
+
+      case 's3-buckets':
+        return (
+          <BucketScreen
+            selectedAccount={selectedAccount}
+            buckets={buckets}
+            loading={loading}
+            selectedBucketIndex={selectedBucketIndex}
+            showAddBucket={showAddBucket}
+            setShowAddBucket={setShowAddBucket}
+            bucketFormData={bucketFormData}
+            setBucketFormData={setBucketFormData}
+            addBucket={addBucket}
+            createdIamResult={createdIamResult}
+            dismissCreatedIamResult={dismissCreatedIamResult}
+            showDeleteConfirm={showDeleteConfirm}
+            statusMessage={statusMessage}
+          />
+        );
+
+      case 's3-objects':
+        return (
+          <BucketObjectsScreen
+            selectedAccount={selectedAccount}
+            selectedBucket={selectedBucket}
+            bucketPrefix={bucketPrefix}
+            objects={objects}
+            loading={loading}
+            selectedObjectIndex={selectedObjectIndex}
+            objectFormMode={objectFormMode}
+            objectFormData={objectFormData}
+            setObjectFormData={setObjectFormData}
+            submitObjectForm={submitObjectForm}
+            cancelObjectForm={cancelObjectForm}
+            showDeleteConfirm={showDeleteConfirm}
+            statusMessage={statusMessage}
           />
         );
 

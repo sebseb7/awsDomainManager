@@ -4,14 +4,14 @@ import { fileURLToPath } from 'url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-export default {
+export default (env, argv) => ({
   entry: './src/cli.jsx',
   output: {
     path: path.resolve(__dirname, 'dist'),
     filename: 'cli.cjs',
   },
   target: 'node',
-  mode: 'production',
+  mode: argv.mode || 'production',
   optimization: {
     minimize: false,
   },
@@ -23,7 +23,16 @@ export default {
         use: {
           loader: 'babel-loader',
           options: {
-            presets: ['@babel/preset-env', '@babel/preset-react'],
+            presets: [
+              '@babel/preset-env',
+              [
+                '@babel/preset-react',
+                {
+                  runtime: 'automatic',
+                  development: argv.mode === 'development',
+                },
+              ],
+            ],
           },
         },
       },
@@ -46,4 +55,4 @@ export default {
       module: /node_modules\/ws\/lib\/validation\.js/,
     },
   ],
-};
+});

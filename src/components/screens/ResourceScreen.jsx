@@ -4,6 +4,8 @@ import { Box, Text, useInput } from 'ink';
 const RESOURCE_TYPES = [
   { id: 'route53', label: 'Route53 Hosted Zones (DNS Records)' },
   { id: 'ec2', label: 'EC2 Security Groups (Inbound Rules)' },
+  { id: 's3', label: 'S3 Buckets (Buckets & Objects)' },
+  { id: 'accounts', label: 'Manage AWS Accounts (Add / Edit / Remove)' },
 ];
 
 const ResourceScreen = ({ selectedResource, setSelectedResource, setScreen }) => {
@@ -15,8 +17,9 @@ const ResourceScreen = ({ selectedResource, setSelectedResource, setScreen }) =>
     } else if (key.downArrow && selectedIndex < RESOURCE_TYPES.length - 1) {
       setSelectedIndex(selectedIndex + 1);
     } else if (input === ' ' || key.return) {
-      setSelectedResource(RESOURCE_TYPES[selectedIndex]);
-      setScreen('account');
+      const chosen = RESOURCE_TYPES[selectedIndex];
+      setSelectedResource(chosen);
+      setScreen(chosen.id === 'accounts' ? 'manage-accounts' : 'account');
     }
   });
 

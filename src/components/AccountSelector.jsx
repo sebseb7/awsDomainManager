@@ -5,6 +5,9 @@ const AccountSelector = ({ accounts, selectedAccount, setSelectedAccount, onSele
   const [selectedIndex, setSelectedIndex] = useState(0);
 
   useInput((input, key) => {
+    if (accounts.length === 0) {
+      return;
+    }
     if (key.upArrow && selectedIndex > 0) {
       setSelectedIndex(selectedIndex - 1);
       setSelectedAccount(accounts[selectedIndex - 1]);
@@ -18,6 +21,14 @@ const AccountSelector = ({ accounts, selectedAccount, setSelectedAccount, onSele
       }
     }
   });
+
+  if (accounts.length === 0) {
+    return (
+      <Box>
+        <Text dimColor>No AWS accounts configured. Go back and select &quot;Manage AWS Accounts&quot; to add one.</Text>
+      </Box>
+    );
+  }
 
   return (
     <Box flexDirection="column">

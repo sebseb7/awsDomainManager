@@ -1,5 +1,7 @@
 import { useInput } from 'ink';
 
+const LIST_SCREENS = ['records', 'rules', 'manage-accounts', 's3-buckets', 's3-objects'];
+
 /**
  * Custom hook for handling global keyboard navigation
  * @param {Object} navigationState - The navigation and UI state
@@ -18,6 +20,9 @@ export const useKeyboardNavigation = (navigationState, navigationActions) => {
     handleDeleteConfirm,
     handleDeleteCancel,
     handleAddRecord,
+    handleEditItem,
+    handleSelectItem,
+    handleDownloadItem,
     handleDeleteRecord,
     handleUpArrow,
     handleDownArrow,
@@ -26,7 +31,7 @@ export const useKeyboardNavigation = (navigationState, navigationActions) => {
   } = navigationActions;
 
   useInput((input, key) => {
-    // When add record/rule form is active, only handle escape
+    // When add/edit form is active, only handle escape
     if (showAddRecord) {
       if (input === 'escape' || key.escape) {
         handleEscape();
@@ -44,9 +49,37 @@ export const useKeyboardNavigation = (navigationState, navigationActions) => {
       return;
     }
 
-    // Handle 'a' to add a rule (EC2 rules screen)
-    if (input === 'a' && screen === 'rules' && !showAddRecord) {
+    // Handle 'a' to add a rule, AWS account, or S3 bucket
+    if (
+      input === 'a' &&
+      (screen === 'rules' || screen === 'manage-accounts' || screen === 's3-buckets') &&
+      !showAddRecord
+    ) {
       handleAddRecord();
+      return;
+    }
+
+    // Handle 'u' to upload an object (S3 objects screen)
+    if (input === 'u' && screen === 's3-objects' && !showAddRecord) {
+      handleAddRecord('upload');
+      return;
+    }
+
+    // Handle 'g' to download selected object (S3 objects screen)
+    if (input === 'g' && screen === 's3-objects' && !showAddRecord && records.length > 0) {
+      handleDownloadItem?.();
+      return;
+    }
+
+    // Handle 'e' or Enter to edit selected AWS account
+    if ((input === 'e' || key.return) && screen === 'manage-accounts' && !showAddRecord && records.length > 0) {
+      handleEditItem?.();
+      return;
+    }
+
+    // Handle Enter to open selected S3 bucket or folder
+    if (key.return && (screen === 's3-buckets' || screen === 's3-objects') && !showAddRecord && records.length > 0) {
+      handleSelectItem?.();
       return;
     }
 
@@ -67,14 +100,14 @@ export const useKeyboardNavigation = (navigationState, navigationActions) => {
       }
     }
 
-    // Handle 'd' to delete (records or rules screen)
-    if (input === 'd' && (screen === 'records' || screen === 'rules') && !showAddRecord && records.length > 0) {
+    // Handle 'd' to delete on list screens
+    if (input === 'd' && LIST_SCREENS.includes(screen) && !showAddRecord && records.length > 0) {
       handleDeleteRecord();
       return;
     }
 
-    // Handle arrow keys for item selection (records or rules screen)
-    if ((screen === 'records' || screen === 'rules') && !showAddRecord && records.length > 0) {
+    // Handle arrow keys for item selection on list screens
+    if (LIST_SCREENS.includes(screen) && !showAddRecord && records.length > 0) {
       if (key.upArrow) {
         handleUpArrow();
       } else if (key.downArrow) {
@@ -84,11 +117,12 @@ export const useKeyboardNavigation = (navigationState, navigationActions) => {
 
     // Handle escape to go back
     if (input === 'escape' || key.escape) {
-      if (screen === 'records' || screen === 'rules') {
-        handleEscape();
-      } else if (screen === 'zone' || screen === 'sg') {
-        handleEscape();
-      } else if (screen === 'account') {
+      if (
+        LIST_SCREENS.includes(screen) ||
+        screen === 'zone' ||
+        screen === 'sg' ||
+        screen === 'account'
+      ) {
         handleEscape();
       } else if (screen === 'resource') {
         // Exit the application when pressing escape on the resource screen

@@ -23,13 +23,15 @@ const AccountScreen = ({
           // Navigate to the correct screen based on selected resource
           if (selectedResource?.id === 'ec2') {
             setScreen('sg');
+          } else if (selectedResource?.id === 's3') {
+            setScreen('s3-buckets');
           } else {
             setScreen('zone');
           }
         }}
       />
       <Box marginTop={1}>
-        <Text dimColor>Use up/down arrows and enter to select, or press escape to quit</Text>
+        <Text dimColor>Use up/down arrows and enter to select, or press escape to go back</Text>
       </Box>
     </Box>
   );
