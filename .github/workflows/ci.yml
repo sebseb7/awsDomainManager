@@ -16,15 +16,21 @@ concurrency:
 env:
   CARGO_TERM_COLOR: always
   CARGO_INCREMENTAL: 0
-  SCCACHE_GHA_ENABLED: 'true'
 
 jobs:
   build-js:
     name: Build TUI & Desktop WebView
     runs-on: ubuntu-latest
+    outputs:
+      desktop_tree_hash: ${{ steps.desktop-tree.outputs.hash }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
+
+      - name: Compute OS-independent desktop source tree hash
+        id: desktop-tree
+        shell: bash
+        run: echo "hash=$(git rev-parse HEAD:desktop)" >> "$GITHUB_OUTPUT"
 
       - name: Setup Node.js 24
         uses: actions/setup-node@v7
@@ -56,7 +62,7 @@ jobs:
         uses: actions/cache@v6
         with:
           path: desktop/dist
-          key: desktop-dist-${{ hashFiles('desktop/package-lock.json', 'desktop/index.html', 'desktop/tsconfig.json', 'desktop/vite.config.ts', 'desktop/src/**') }}
+          key: desktop-dist-${{ steps.desktop-tree.outputs.hash }}
 
       - name: Cache desktop node_modules
         if: steps.cache-desktop-dist.outputs.cache-hit != 'true'
@@ -73,19 +79,17 @@ jobs:
         working-directory: desktop
         run: npm ci --prefer-offline
 
-      - name: Cache Vite pre-bundled dependencies
-        if: steps.cache-desktop-dist.outputs.cache-hit != 'true'
-        uses: actions/cache@v6
-        with:
-          path: desktop/node_modules/.vite
-          key: ${{ runner.os }}-vite-${{ hashFiles('desktop/package-lock.json', 'desktop/vite.config.ts') }}
-          restore-keys: |
-            ${{ runner.os }}-vite-
-
       - name: Typecheck and build desktop WebView bundle
         if: steps.cache-desktop-dist.outputs.cache-hit != 'true'
         working-directory: desktop
         run: npm run build
+
+      - name: Upload desktop WebView artifact (fallback if cache save is rate-limited)
+        uses: actions/upload-artifact@v7
+        with:
+          name: desktop-dist
+          path: desktop/dist
+          retention-days: 1
 
   build-desktop:
     name: Build Desktop (${{ matrix.platform }})
@@ -102,31 +106,33 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v7
 
-      - name: Restore pre-built desktop WebView bundle
+      - name: Restore pre-built desktop WebView bundle from cache
         id: restore-desktop-dist
         uses: actions/cache/restore@v6
         with:
           path: desktop/dist
-          key: desktop-dist-${{ hashFiles('desktop/package-lock.json', 'desktop/index.html', 'desktop/tsconfig.json', 'desktop/vite.config.ts', 'desktop/src/**') }}
-          fail-on-cache-miss: true
+          key: desktop-dist-${{ needs.build-js.outputs.desktop_tree_hash }}
+
+      - name: Download desktop WebView artifact on cache miss
+        if: steps.restore-desktop-dist.outputs.cache-hit != 'true'
+        uses: actions/download-artifact@v8
+        with:
+          name: desktop-dist
+          path: desktop/dist
 
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Setup sccache (per-crate Rust compilation cache)
+      - name: Setup sccache
         uses: mozilla-actions/sccache-action@v0.0.11
 
-      - name: Cache Cargo registry and git index
+      - name: Cache sccache artifacts (single archive, no API rate limit)
         uses: actions/cache@v6
         with:
-          path: |
-            ~/.cargo/bin/
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('desktop/src-tauri/Cargo.lock', 'desktop/src-tauri/Cargo.toml') }}
+          path: ${{ runner.temp }}/sccache-cache
+          key: ${{ runner.os }}-sccache-${{ github.sha }}
           restore-keys: |
-            ${{ runner.os }}-cargo-registry-
+            ${{ runner.os }}-sccache-
 
       - name: Cache Rust target artifacts
         uses: Swatinem/rust-cache@v2
@@ -140,6 +146,7 @@ jobs:
       - name: Build Rust backend (no distribution packaging)
         env:
           RUSTC_WRAPPER: sccache
+          SCCACHE_DIR: ${{ runner.temp }}/sccache-cache
         run: cargo build --release --manifest-path desktop/src-tauri/Cargo.toml
 
       - name: Show sccache statistics
