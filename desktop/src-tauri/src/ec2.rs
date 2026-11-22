@@ -1,18 +1,9 @@
-use crate::aws_client::build_sdk_config;
-use aws_sdk_ec2::error::{DisplayErrorContext, ProvideErrorMetadata};
+use crate::aws_client::{build_sdk_config, format_aws_err};
 use aws_sdk_ec2::types::{AddressAttributeName, DomainType, Filter, IpPermission, IpRange, Tag};
 use aws_sdk_ec2::Client;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::time::Duration;
-
-fn format_aws_err<E: ProvideErrorMetadata + std::error::Error>(err: &E) -> String {
-    match (err.code(), err.message()) {
-        (Some(code), Some(msg)) => format!("{}: {}", code, msg),
-        (None, Some(msg)) => msg.to_string(),
-        _ => format!("{}", DisplayErrorContext(err)),
-    }
-}
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]

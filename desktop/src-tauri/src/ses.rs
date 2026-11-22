@@ -1,22 +1,14 @@
-use crate::aws_client::build_sdk_config;
+use crate::aws_client::{build_sdk_config, format_aws_err};
 use crate::route53::{
     check_dkim_records_in_list, check_dmarc_record_in_list, check_ses_mx_record_in_list,
     extract_domain_from_identity, find_mx_record_in_list, list_dns_records,
     load_all_zones_across_profiles, match_domain_in_zones, ses_inbound_mx_value,
     upsert_ses_dns_records, upsert_ses_mx_record, DnsRecordDto,
 };
-use aws_sdk_sesv2::error::{DisplayErrorContext, ProvideErrorMetadata};
+use aws_sdk_sesv2::error::ProvideErrorMetadata;
 use aws_sdk_sesv2::Client;
 use serde::Serialize;
 use std::collections::HashMap;
-
-fn format_aws_err<E: ProvideErrorMetadata + std::error::Error>(err: &E) -> String {
-    match (err.code(), err.message()) {
-        (Some(code), Some(msg)) => format!("{}: {}", code, msg),
-        (None, Some(msg)) => msg.to_string(),
-        _ => format!("{}", DisplayErrorContext(err)),
-    }
-}
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]

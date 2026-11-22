@@ -1,4 +1,4 @@
-use crate::aws_client::build_sdk_config;
+use crate::aws_client::{build_sdk_config, format_aws_err};
 use aws_sdk_s3::primitives::ByteStream;
 use aws_sdk_s3::types::{BucketLocationConstraint, CreateBucketConfiguration};
 use aws_sdk_s3::Client;
@@ -119,7 +119,7 @@ pub async fn list_buckets(profile: &str) -> Result<Vec<BucketDto>, String> {
         .list_buckets()
         .send()
         .await
-        .map_err(|e| format!("Failed to load S3 buckets: {}", e))?;
+        .map_err(|e| format!("Failed to load S3 buckets: {}", format_aws_err(&e)))?;
 
     let mut buckets: Vec<BucketDto> = resp
         .buckets()
@@ -160,7 +160,7 @@ pub async fn create_bucket(
 
     req.send()
         .await
-        .map_err(|e| format!("Failed to create bucket: {}", e))?;
+        .map_err(|e| format!("Failed to create bucket: {}", format_aws_err(&e)))?;
 
     Ok(valid_name)
 }
@@ -172,7 +172,7 @@ pub async fn delete_bucket(profile: &str, bucket_name: &str) -> Result<(), Strin
         .bucket(bucket_name)
         .send()
         .await
-        .map_err(|e| format!("Failed to delete bucket: {}", e))?;
+        .map_err(|e| format!("Failed to delete bucket: {}", format_aws_err(&e)))?;
     Ok(())
 }
 
@@ -191,7 +191,7 @@ pub async fn list_bucket_objects(
         .max_keys(500)
         .send()
         .await
-        .map_err(|e| format!("Failed to load objects: {}", e))?;
+        .map_err(|e| format!("Failed to load objects: {}", format_aws_err(&e)))?;
 
     let mut items = Vec::new();
 
@@ -267,7 +267,7 @@ pub async fn upload_object(
         .body(body)
         .send()
         .await
-        .map_err(|e| format!("Failed to upload object: {}", e))?;
+        .map_err(|e| format!("Failed to upload object: {}", format_aws_err(&e)))?;
 
     Ok(final_key)
 }
@@ -294,7 +294,7 @@ pub async fn download_object(
         .key(key)
         .send()
         .await
-        .map_err(|e| format!("Failed to download object: {}", e))?;
+        .map_err(|e| format!("Failed to download object: {}", format_aws_err(&e)))?;
 
     let mut file = fs::File::create(dest)
         .await
@@ -326,6 +326,6 @@ pub async fn delete_object(profile: &str, bucket_name: &str, key: &str) -> Resul
         .key(key)
         .send()
         .await
-        .map_err(|e| format!("Failed to delete object: {}", e))?;
+        .map_err(|e| format!("Failed to delete object: {}", format_aws_err(&e)))?;
     Ok(())
 }

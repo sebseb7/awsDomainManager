@@ -1,6 +1,5 @@
-use crate::aws_client::build_sdk_config;
+use crate::aws_client::{build_sdk_config, format_aws_err};
 use crate::iam::IamAccessKeyMetaDto;
-use aws_sdk_iam::error::{DisplayErrorContext, ProvideErrorMetadata};
 use aws_sdk_iam::types::Tag;
 use aws_sdk_iam::Client;
 use base64::Engine as _;
@@ -18,14 +17,6 @@ type HmacSha256 = Hmac<Sha256>;
 
 pub const SES_SMTP_USER_PATH: &str = "/ses-smtp-users/";
 pub const SES_SENDING_POLICY_NAME: &str = "AmazonSesSendingAccess";
-
-fn format_aws_err<E: ProvideErrorMetadata + std::error::Error>(err: &E) -> String {
-    match (err.code(), err.message()) {
-        (Some(code), Some(msg)) => format!("{}: {}", code, msg),
-        (None, Some(msg)) => msg.to_string(),
-        _ => format!("{}", DisplayErrorContext(err)),
-    }
-}
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]

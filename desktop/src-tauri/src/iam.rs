@@ -1,18 +1,9 @@
-use crate::aws_client::build_sdk_config;
-use aws_sdk_iam::error::{DisplayErrorContext, ProvideErrorMetadata};
+use crate::aws_client::{build_sdk_config, format_aws_err};
 use aws_sdk_iam::types::Tag;
 use aws_sdk_iam::Client;
 use serde::Serialize;
 use serde_json::json;
 use std::collections::HashSet;
-
-fn format_aws_err<E: ProvideErrorMetadata + std::error::Error>(err: &E) -> String {
-    match (err.code(), err.message()) {
-        (Some(code), Some(msg)) => format!("{}: {}", code, msg),
-        (None, Some(msg)) => msg.to_string(),
-        _ => format!("{}", DisplayErrorContext(err)),
-    }
-}
 
 const BUCKET_USER_PATH: &str = "/s3-bucket-users/";
 

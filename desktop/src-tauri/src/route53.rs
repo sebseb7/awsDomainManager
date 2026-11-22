@@ -1,4 +1,4 @@
-use crate::aws_client::build_sdk_config;
+use crate::aws_client::{build_sdk_config, format_aws_err};
 use aws_sdk_route53::types::{
     Change, ChangeAction, ChangeBatch, ResourceRecord, ResourceRecordSet, RrType,
 };
@@ -172,7 +172,7 @@ pub async fn list_hosted_zones(profile: &str) -> Result<Vec<HostedZoneDto>, Stri
         .list_hosted_zones()
         .send()
         .await
-        .map_err(|e| format!("Failed to load hosted zones: {}", e))?;
+        .map_err(|e| format!("Failed to load hosted zones: {}", format_aws_err(&e)))?;
 
     let zones = resp
         .hosted_zones()
@@ -202,7 +202,7 @@ pub async fn list_dns_records(
         .max_items(300)
         .send()
         .await
-        .map_err(|e| format!("Failed to load DNS records: {}", e))?;
+        .map_err(|e| format!("Failed to load DNS records: {}", format_aws_err(&e)))?;
 
     let supported = ["A", "AAAA", "CNAME", "MX", "TXT", "NS"];
     let records = resp
@@ -270,7 +270,7 @@ pub async fn create_dns_record(
         .change_batch(batch)
         .send()
         .await
-        .map_err(|e| format!("Failed to add record: {}", e))?;
+        .map_err(|e| format!("Failed to add record: {}", format_aws_err(&e)))?;
 
     Ok(())
 }
@@ -321,7 +321,7 @@ pub async fn delete_dns_record(
         .change_batch(batch)
         .send()
         .await
-        .map_err(|e| format!("Failed to delete record: {}", e))?;
+        .map_err(|e| format!("Failed to delete record: {}", format_aws_err(&e)))?;
 
     Ok(())
 }
@@ -482,7 +482,7 @@ pub async fn upsert_ses_dns_records(
         .change_batch(batch)
         .send()
         .await
-        .map_err(|e| format!("Failed publishing SES DNS records to Route53: {}", e))?;
+        .map_err(|e| format!("Failed publishing SES DNS records to Route53: {}", format_aws_err(&e)))?;
 
     Ok(count)
 }
@@ -532,7 +532,7 @@ pub async fn upsert_ses_mx_record(
         .change_batch(batch)
         .send()
         .await
-        .map_err(|e| format!("Failed publishing SES inbound MX record to Route53: {}", e))?;
+        .map_err(|e| format!("Failed publishing SES inbound MX record to Route53: {}", format_aws_err(&e)))?;
 
     Ok(mx_value)
 }
